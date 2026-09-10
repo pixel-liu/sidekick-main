@@ -137,9 +137,9 @@ public class Agent {
         updateSystemPromptWithMemory(memoryContext);
 
         // 添加用户输入到历史（如有 skill body 注入，前置到原文之前）
-        String userMessageContent = prependSkillBodies(userInput);
+//        String userMessageContent = prependSkillBodies(userInput);
         conversationHistory.add(ImageReferenceParser.userMessage(
-                userMessageContent,
+                userInput,
                 Path.of(toolRegistry.getProjectPath())));
         StringBuilder reasoningTranscript = new StringBuilder();
         StreamRenderer streamRenderer = new StreamRenderer(renderer());
@@ -170,7 +170,14 @@ public class Agent {
                 pushStatus(budget, startNanos, "idle");
                 return "❌ " + description;
             }
-
+            // 调用LLM前注入skill正文内容
+            String skillBodies = injectSkillBodies();
+            if (skillBodies != null) {
+                conversationHistory.add(ImageReferenceParser.userMessage(
+                        skillBodies,
+                        Path.of(toolRegistry.getProjectPath())));
+                log.info("SKILL bodies alraedy inject !!!");
+            }
             int iteration = budget.beginIteration();
 
             try {
@@ -380,6 +387,15 @@ public class Agent {
         String drained = skillContextBuffer.drain();
         if (drained.isEmpty()) return userInput;
         return drained + "\n用户输入：\n" + userInput;
+    }
+
+    private String injectSkillBodies() {
+        if (skillContextBuffer == null || skillContextBuffer.isEmpty()) {
+            return null;
+        }
+        String drained = skillContextBuffer.drain();
+        if (drained.isEmpty()) return null;
+        return drained;
     }
 
     private String buildExternalContext() {

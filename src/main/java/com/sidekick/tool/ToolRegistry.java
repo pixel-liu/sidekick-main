@@ -699,7 +699,7 @@ public class ToolRegistry {
                         skillContextBuffer.push(name, injected);
                     }
                     return "已加载 skill '" + name + "' 的完整指引（" + originalLen
-                            + " bytes），将在下一轮上下文中以 \"## 已加载 Skill：" + name + "\" 段出现。";
+                            + " bytes），将在下一轮上下文中以 <runtime_skill_injection name=" + name + "> 段出现。";
                 }
         ));
     }
