@@ -40,7 +40,7 @@ mvn test -DskipTests=false
 
 - 短期记忆管理当前对话与工具结果
 - 长期记忆通过 `/save <事实>` 或用户明确说“记一下 / 记住”时的 `save_memory` 保存关键事实，默认项目级作用域，跨会话复用
-- 项目级记忆通过 `PAI.md` / `.Sidekick/PAI.md` 启动自动注入，适合提交到仓库的团队共享规则；`PAI.local.md` / `.Sidekick/PAI.local.md` 只做本地覆盖
+- 项目级记忆通过 `SideKick.md` / `.sidekick/SideKick.md` 启动自动注入，适合提交到仓库的团队共享规则；`SideKick.local.md` / `.sidekick/SideKick.local.md` 只做本地覆盖，同时兼容 `PAI.md` 系列文件名
 - 注入给模型的相关记忆只使用长期稳定事实，不把当前轮短期对话误当成“历史记忆”
 - 对话接近预算时自动做摘要压缩
 - 新增 `/memory` 查看状态、`/memory list/search/delete/clear` 管理长期记忆、`/save` 手动保存事实；Agent 在用户明确说“记一下 / 记住”时可调用 `save_memory`
@@ -158,7 +158,7 @@ mvn test -DskipTests=false
 
 - ReAct、Plan task executor、Multi-Agent 三角色、Planner 的 system prompt 已从 Java 硬编码抽离到 `src/main/resources/prompts/`
 - `PromptAssembler` 按 `base -> personality -> mode -> approval -> runtime_context -> project_context -> skills -> context_mgmt -> handoff` 组装；`runtime_context` 注入当前日期/时区，动态项目上下文靠后注入
-- `project_context` 会先注入 `PAI.md` 项目记忆，再注入 `/save` 检索到的相关长期记忆和 MCP resource 索引
+- `project_context` 会先注入 `SideKick.md` 项目记忆，再注入 `/save` 检索到的相关长期记忆和 MCP resource 索引
 - 支持用户级覆盖 `~/.Sidekick/prompts/...`，支持项目级覆盖 `.Sidekick/prompts/...`，项目级优先级最高
 - 覆盖是整文件替换；`base.md` 和最终 prompt 必须包含 `## Language`
 - Prompt 改动审计模板见 `docs/prompt-analysis-template.md`
@@ -172,6 +172,7 @@ mvn test -DskipTests=false
 - `java -jar target/Sidekick-1.0-SNAPSHOT.jar serve --http --port 8080` 启动 localhost Runtime API
 - Runtime API 端点：`POST /v1/threads`、`POST /v1/threads/{id}/turns`、`GET /v1/threads/{id}/events`
 - Runtime API 强制要求 `Sidekick_RUNTIME_API_KEY` 或 `-DSidekick.runtime.api.key`
+- Runtime API 使用独立的有界 turn 线程池；队列满时返回 HTTP 429，错误和事件响应统一由 Jackson 生成合法 JSON，格式错误的请求返回 HTTP 400
 - 详细文档见 `docs/phase-20-runtime-api.md`
 
 
@@ -231,15 +232,17 @@ export AGNES_BASE_URL=https://apihub.agnes-ai.com/v1
 长期记忆只保存显式保存意图下的稳定事实：`/save <事实>`，或用户在自然语言里明确说“记一下 / 记住 / 以后记得”时由 Agent 调用 `save_memory`。默认保存为当前项目作用域；跨项目通用偏好可用 `/save --global <事实>` 或 `save_memory(scope=global)`。它不应包含一次性任务请求或临时文件名/目录名。
 可用 `/memory list` 查看长期记忆，`/memory search <关键词>` 搜索当前项目可见记忆，`/memory delete <id>` 删除单条记忆。
 相同内容仅在同一作用域和同一项目内去重；不同项目、全局与项目作用域可以分别保存相同事实。
+长期记忆通过同目录临时文件原子替换，降低进程中断时留下半写 JSON 的风险。
 
 项目级记忆使用 Markdown 文件维护，和 `/save` 的长期记忆分工不同：
 
-- `~/.Sidekick/PAI.md`：用户级稳定偏好，所有项目可见。
-- `PAI.md` / `.Sidekick/PAI.md`：项目级团队规则，建议提交到 git。
-- `PAI.local.md` / `.Sidekick/PAI.local.md`：本地覆盖，适合个人调试约定，建议加入 `.gitignore`。
-- `@relative/path.md`：在 `PAI.md` 中导入项目根内的相对文件；越靠后的文件越接近本地覆盖，优先级越高。
+- `~/.sidekick/SideKick.md`：用户级稳定偏好，所有项目可见。
+- `SideKick.md` / `.sidekick/SideKick.md`：项目级团队规则，建议提交到 git。
+- `SideKick.local.md` / `.sidekick/SideKick.local.md`：本地覆盖，适合个人调试约定，建议加入 `.gitignore`。
+- 兼容 `PAI.md` / `PAI.local.md`；同一位置同时存在时优先读取 `SideKick.md` 系列。
+- `@relative/path.md`：在项目记忆文件中导入项目根内的相对文件；越靠后的文件越接近本地覆盖，优先级越高。
 
-可用 `/init` 为当前项目生成一份短 `PAI.md`。该命令默认不覆盖已有文件；确认需要重建时使用 `/init --force`。
+可用 `/init` 为当前项目生成一份短 `SideKick.md`。该命令默认不覆盖已有文件；确认需要重建时使用 `/init --force`。
 代码索引默认保存在 `~/.Sidekick/rag/codebase.db`。
 重建索引时，全部文件的分块、向量和关系准备成功后才会在单个事务中替换旧索引；遍历、向量生成或写入失败会保留原有索引并提示失败。
 调试日志默认滚动写入 `~/.Sidekick/logs/Sidekick.log`，旧日志会按保留天数和总容量自动清理。
@@ -383,12 +386,12 @@ mvn clean compile exec:java -Dexec.mainClass="com.sidekick.cli.Main"
 
 ## 可用工具
 
-- `read_file` - 读取文件内容
+- `read_file` - 流式读取文件内容；整文件读取最多返回 60,000 个字符，超出时提示截断，也可通过 offset/limit 读取指定行段
 - `write_file` - 写入文件内容
 - `list_dir` - 列出目录内容
 - `glob_files` - 按文件名 glob 实时查找项目内文件（只读，自动跳过常见构建/依赖目录）
 - `grep_code` - 按关键字或正则实时搜索项目内代码，优先使用 ripgrep，返回文件、行号、可选上下文、partial 状态与 suggested_reads
-- `execute_command` - 在当前项目目录执行短时 Shell 命令（默认 60 秒超时，黑名单拦截破坏性命令）
+- `execute_command` - 在当前项目目录执行短时 Shell 命令（默认 60 秒超时，超时会终止完整进程树，黑名单拦截破坏性命令）
 - `create_project` - 创建项目结构（java/python/node）
 - `search_code` - 语义检索代码库（自然语言查询，适合作为模糊语义或常规搜索无果时的辅助）
 - `web_search` - 搜索互联网获取实时信息
@@ -437,7 +440,7 @@ mvn clean compile exec:java -Dexec.mainClass="com.sidekick.cli.Main"
 - `/memory clear` - 清空长期记忆
 - `/save <事实>` - 手动保存项目级关键事实到长期记忆；`/save --global <事实>` 保存跨项目通用偏好
 - `save_memory` - Agent 内置工具，仅在用户明确要求保存长期偏好或稳定事实时调用；默认 `scope=project`，跨项目通用偏好才用 `scope=global`
-- `/init` - 生成精简项目级记忆 `PAI.md`；已存在时不覆盖，`/init --force` 可重写
+- `/init` - 生成精简项目级记忆 `SideKick.md`；已存在时不覆盖，`/init --force` 可重写
 - `/export` - 导出当前 ReAct 会话对话记录为 Markdown（包含完整 system prompt），写入 `~/.Sidekick/exports/session-*.md`
 - `/index [路径]` - 索引代码库（默认当前目录）
 - `/search <查询>` - 语义检索代码（RAG 辅助路径）

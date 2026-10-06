@@ -3,7 +3,9 @@ package com.sidekick.rag;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -11,20 +13,33 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class CodeRetrieverTest {
 
-    private static final String TEST_PROJECT = "/tmp/Sidekick-code-retriever";
+    @TempDir
+    Path tempDir;
     private VectorStore store;
+    private String previousRagDir;
+    private String testProject;
 
     @BeforeEach
     void setUp() throws Exception {
-        System.setProperty("Sidekick.rag.dir", "/tmp/Sidekick-test-rag-retriever");
-        store = new VectorStore(TEST_PROJECT);
+        previousRagDir = System.getProperty("Sidekick.rag.dir");
+        System.setProperty("Sidekick.rag.dir", tempDir.resolve("rag").toString());
+        testProject = tempDir.resolve("project").toString();
+        store = new VectorStore(testProject);
         store.clearProject();
     }
 
     @AfterEach
     void tearDown() throws Exception {
-        if (store != null) {
-            store.close();
+        try {
+            if (store != null) {
+                store.close();
+            }
+        } finally {
+            if (previousRagDir == null) {
+                System.clearProperty("Sidekick.rag.dir");
+            } else {
+                System.setProperty("Sidekick.rag.dir", previousRagDir);
+            }
         }
     }
 
@@ -55,7 +70,7 @@ class CodeRetrieverTest {
             }
         };
 
-        try (CodeRetriever retriever = new CodeRetriever(TEST_PROJECT, stubClient)) {
+        try (CodeRetriever retriever = new CodeRetriever(testProject, stubClient)) {
             List<VectorStore.SearchResult> results = retriever.hybridSearch("Agent的ReAct循环是怎么实现的", 5);
 
             assertFalse(results.isEmpty());

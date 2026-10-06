@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.time.Instant;
 import java.util.Map;
 
@@ -137,6 +138,20 @@ class LongTermMemoryTest {
         LongTermMemory reloaded = new LongTermMemory(tempDir.toFile());
         assertEquals(2, reloaded.size());
         assertTrue(reloaded.retrieve("f1").isPresent());
+    }
+
+    @Test
+    void shouldAtomicallyReplaceTheMemoryFileWithoutLeavingTemporaryFiles() throws Exception {
+        memory.store(new MemoryEntry("f1", "第一版", MemoryEntry.MemoryType.FACT, null, 5));
+        memory.delete("f1");
+        memory.store(new MemoryEntry("f2", "第二版", MemoryEntry.MemoryType.FACT, null, 5));
+
+        LongTermMemory reloaded = new LongTermMemory(tempDir.toFile());
+        assertEquals(1, reloaded.size());
+        assertTrue(reloaded.retrieve("f2").isPresent());
+        try (var files = Files.list(tempDir)) {
+            assertTrue(files.noneMatch(path -> path.getFileName().toString().endsWith(".tmp")));
+        }
     }
 
     @Test

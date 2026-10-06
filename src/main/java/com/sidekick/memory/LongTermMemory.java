@@ -7,6 +7,10 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -109,7 +113,7 @@ public class LongTermMemory implements Memory {
     }
 
     @Override
-    public boolean delete(String id) {
+    public synchronized boolean delete(String id) {
         MemoryEntry removed = entries.remove(id);
         if (removed != null) {
             tokenCounter.addAndGet(-removed.getTokenCount());
@@ -120,7 +124,7 @@ public class LongTermMemory implements Memory {
     }
 
     @Override
-    public void clear() {
+    public synchronized void clear() {
         entries.clear();
         tokenCounter.set(0);
         saveToDisk();
@@ -166,13 +170,30 @@ public class LongTermMemory implements Memory {
      * 持久化到磁盘
      */
     private void saveToDisk() {
+        Path temporary = null;
         try {
             List<Map<String, Object>> dataList = entries.values().stream()
                     .map(this::entryToMap)
                     .collect(Collectors.toList());
-            mapper.writeValue(storageFile, dataList);
+            Path target = storageFile.toPath();
+            temporary = Files.createTempFile(target.getParent(), STORAGE_FILE + ".", ".tmp");
+            mapper.writeValue(temporary.toFile(), dataList);
+            try {
+                Files.move(temporary, target,
+                        StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException e) {
             log.warn("长期记忆持久化失败: {}", e.getMessage(), e);
+        } finally {
+            if (temporary != null) {
+                try {
+                    Files.deleteIfExists(temporary);
+                } catch (IOException e) {
+                    log.debug("清理长期记忆临时文件失败: {}", temporary, e);
+                }
+            }
         }
     }
 

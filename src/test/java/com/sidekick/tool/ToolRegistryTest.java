@@ -27,9 +27,11 @@ class ToolRegistryTest {
         ToolRegistry registry = new ToolRegistry();
         registry.setProjectPath(tempDir.toString());
 
-        String result = registry.executeTool("execute_command", "{\"command\":\"pwd\"}");
+        String command = isWindows() ? "cd" : "pwd";
+        String result = registry.executeTool("execute_command",
+                "{\"command\":\"" + command + "\"}");
 
-        assertTrue(result.contains(tempDir.toString()));
+        assertTrue(result.toLowerCase().contains(tempDir.toString().toLowerCase()), result);
     }
 
     @Test
@@ -61,6 +63,19 @@ class ToolRegistryTest {
     }
 
     @Test
+    void shouldBoundWholeFileReadsWithoutLoadingTheEntireFile(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("large.txt");
+        Files.writeString(file, "x".repeat(80_000));
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("read_file", "{\"path\":\"large.txt\"}");
+
+        assertTrue(result.contains("内容已截断"));
+        assertTrue(result.length() < 61_000, "工具结果不应包含完整大文件");
+    }
+
+    @Test
     void shouldGlobFilesInsideProject(@TempDir Path tempDir) throws Exception {
         Files.createDirectories(tempDir.resolve("src/main/java/com/example"));
         Files.writeString(tempDir.resolve("src/main/java/com/example/UserService.java"), "class UserService {}\n");
@@ -70,7 +85,7 @@ class ToolRegistryTest {
 
         String result = registry.executeTool("glob_files", "{\"pattern\":\"**/*Service.java\"}");
 
-        assertTrue(result.contains("src/main/java/com/example/UserService.java"));
+        assertTrue(result.contains("src/main/java/com/example/UserService.java"), result);
         assertTrue(!result.contains("README.md"));
     }
 
@@ -100,7 +115,7 @@ class ToolRegistryTest {
         String result = registry.executeTool("grep_code",
                 "{\"pattern\":\"getUserById\",\"glob\":\"**/*.java\",\"context_lines\":1}");
 
-        assertTrue(result.contains("src/main/java/com/example/UserService.java:2"));
+        assertTrue(result.contains("src/main/java/com/example/UserService.java:2"), result);
         assertTrue(result.contains(">    2 |   User getUserById(String id) {"));
         assertTrue(result.contains("     3 |     return repository.findById(id);"));
     }
@@ -116,7 +131,7 @@ class ToolRegistryTest {
 
         String result = registry.executeTool("grep_code", "{\"pattern\":\"targetSymbol\",\"max_results\":10}");
 
-        assertTrue(result.contains("src/App.java:1"));
+        assertTrue(result.contains("src/App.java:1"), result);
         assertTrue(!result.contains("node_modules"));
     }
 
@@ -177,9 +192,11 @@ class ToolRegistryTest {
         ToolRegistry registry = new ToolRegistry(1);
         registry.setProjectPath(tempDir.toString());
 
-        String result = registry.executeTool("execute_command", "{\"command\":\"sleep 2\"}");
+        String command = isWindows() ? "ping -n 3 127.0.0.1 > nul" : "sleep 2";
+        String result = registry.executeTool("execute_command",
+                "{\"command\":\"" + command + "\"}");
 
-        assertTrue(result.contains("命令执行超时"));
+        assertTrue(result.contains("命令执行超时"), result);
     }
 
     @Test
@@ -202,6 +219,10 @@ class ToolRegistryTest {
         assertTrue(result.contains("step-result"));
         assertTrue(result.contains("\"query\":\"Step 3.7 Flash\""));
         assertTrue(result.contains("\"top_k\":3"));
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase().contains("win");
     }
 
     @Test

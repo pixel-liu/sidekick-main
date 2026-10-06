@@ -3,6 +3,7 @@ package com.sidekick.image;
 import com.sidekick.llm.LlmClient;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -155,14 +156,26 @@ public class ImageReferenceParser {
     // 其他字符（包括空格、中文、未编码字节）原样保留。
     private static String fileUriToLocalPath(String value) {
         String afterScheme = value.substring("file://".length());
-        String pathPart;
-        if (afterScheme.startsWith("/")) {
-            pathPart = afterScheme;
-        } else {
-            int slashIdx = afterScheme.indexOf('/');
-            pathPart = slashIdx < 0 ? "/" + afterScheme : afterScheme.substring(slashIdx);
+        String decoded = percentDecodeUtf8(afterScheme);
+        if (File.separatorChar == '\\') {
+            if (decoded.matches("^/[A-Za-z]:[/\\\\].*")) {
+                return decoded.substring(1);
+            }
+            if (decoded.matches("^[A-Za-z]:[/\\\\].*")) {
+                return decoded;
+            }
+            if (!decoded.startsWith("/") && decoded.contains("/")) {
+                return "\\\\" + decoded.replace('/', '\\');
+            }
         }
-        return percentDecodeUtf8(pathPart);
+        String pathPart;
+        if (decoded.startsWith("/")) {
+            pathPart = decoded;
+        } else {
+            int slashIdx = decoded.indexOf('/');
+            pathPart = slashIdx < 0 ? "/" + decoded : decoded.substring(slashIdx);
+        }
+        return pathPart;
     }
 
     private static String percentDecodeUtf8(String s) {

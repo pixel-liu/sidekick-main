@@ -61,4 +61,25 @@ class ProjectMemoryLoaderTest {
 
         assertTrue(context.isEmpty());
     }
+
+    @Test
+    void prefersSidekickNamesAndFallsBackToPaiNames() throws Exception {
+        Path userDir = tempDir.resolve("user");
+        Path projectRoot = tempDir.resolve("project");
+        Files.createDirectories(userDir);
+        Files.createDirectories(projectRoot.resolve(".sidekick"));
+        Files.writeString(userDir.resolve("SideKick.md"), "- preferred user rule");
+        Files.writeString(userDir.resolve("PAI.md"), "- compatible user rule");
+        Files.writeString(projectRoot.resolve("PAI.md"), "- compatible project rule");
+        Files.writeString(projectRoot.resolve("SideKick.local.md"), "- preferred local rule");
+        Files.writeString(projectRoot.resolve("PAI.local.md"), "- compatible local rule");
+
+        String context = new ProjectMemoryLoader(userDir, projectRoot).loadForPrompt();
+
+        assertTrue(context.contains("preferred user rule"));
+        assertFalse(context.contains("compatible user rule"));
+        assertTrue(context.contains("compatible project rule"));
+        assertTrue(context.contains("preferred local rule"));
+        assertFalse(context.contains("compatible local rule"));
+    }
 }

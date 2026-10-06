@@ -66,27 +66,33 @@ public class ProjectMemoryLoader {
     private List<MemorySource> sources() {
         List<MemorySource> sources = new ArrayList<>();
         if (userConfigDir != null) {
-            sources.add(new MemorySource(userConfigDir.resolve("SideKick.md"), userConfigDir));
+            sources.add(new MemorySource(preferredMemoryFile(userConfigDir, "SideKick.md", "PAI.md"), userConfigDir));
         }
-        sources.add(new MemorySource(projectRoot.resolve("SideKick.md"), projectRoot));
-        sources.add(new MemorySource(projectRoot.resolve(".sidekick").resolve("SideKick.md"), projectRoot));
-        sources.add(new MemorySource(projectRoot.resolve("PAI.local.md"), projectRoot));
-        sources.add(new MemorySource(projectRoot.resolve(".sidekick").resolve("SideKick.local.md"), projectRoot));
+        sources.add(new MemorySource(preferredMemoryFile(projectRoot, "SideKick.md", "PAI.md"), projectRoot));
+        Path dotSidekick = projectRoot.resolve(".sidekick");
+        sources.add(new MemorySource(preferredMemoryFile(dotSidekick, "SideKick.md", "PAI.md"), projectRoot));
+        sources.add(new MemorySource(preferredMemoryFile(projectRoot, "SideKick.local.md", "PAI.local.md"), projectRoot));
+        sources.add(new MemorySource(preferredMemoryFile(dotSidekick, "SideKick.local.md", "PAI.local.md"), projectRoot));
         return sources;
+    }
+
+    private static Path preferredMemoryFile(Path directory, String preferredName, String legacyName) {
+        Path preferred = directory.resolve(preferredName);
+        return Files.isRegularFile(preferred) ? preferred : directory.resolve(legacyName);
     }
 
     private String readWithImports(Path file, Path importRoot, Set<Path> importStack, int depth) {
         Path normalized = file.toAbsolutePath().normalize();
         if (depth > MAX_IMPORT_DEPTH) {
-            log.warn("Skipping SideKick.md import beyond depth {}: {}", MAX_IMPORT_DEPTH, normalized);
+            log.warn("Skipping project memory import beyond depth {}: {}", MAX_IMPORT_DEPTH, normalized);
             return "";
         }
         if (!normalized.startsWith(importRoot) || !Files.isRegularFile(normalized)) {
-            log.warn("Skipping SideKick.md import outside allowed root or missing file: {}", normalized);
+            log.warn("Skipping project memory import outside allowed root or missing file: {}", normalized);
             return "";
         }
         if (!importStack.add(normalized)) {
-            log.warn("Skipping cyclic SideKick.md import: {}", normalized);
+            log.warn("Skipping cyclic project memory import: {}", normalized);
             return "";
         }
 
@@ -106,7 +112,7 @@ public class ProjectMemoryLoader {
             }
             return out.toString();
         } catch (IOException e) {
-            log.warn("Failed to read SideKick.md memory file: {}", normalized, e);
+            log.warn("Failed to read project memory file: {}", normalized, e);
             return "";
         } finally {
             importStack.remove(normalized);

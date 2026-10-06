@@ -63,6 +63,7 @@ public class ToolRegistry {
     private static final int MAX_PARALLEL_TOOLS = 4;
     private static final int MAX_COMMAND_OUTPUT_CHARS = 8_000;
     private static final int MAX_READ_FILE_LINES = 2_000;
+    private static final int MAX_READ_FILE_CHARS = 60_000;
     private static final int MAX_GREP_RESULTS = 200;
     private static final int MAX_GREP_CONTEXT_LINES = 5;
     private static final int DEFAULT_GREP_MAX_CHARS = 24_000;
@@ -233,11 +234,11 @@ public class ToolRegistry {
         // read_file 工具
         tools.put("read_file", new Tool(
                 "read_file",
-                "读取文件内容（仅限项目根目录之内）；可用 offset/limit 按行读取，避免把大文件整段塞进上下文",
+                "读取文件内容（仅限项目根目录之内，单次最多 60000 字符）；可用 offset/limit 按行读取大文件",
                 createParameters(
                         new Param("path", "string", "文件路径", true),
-                        new Param("offset", "integer", "起始行号，1 表示第一行；省略时读取全文", false),
-                        new Param("limit", "integer", "最多读取多少行；省略时读取全文，最大 2000 行", false)
+                        new Param("offset", "integer", "起始行号，1 表示第一行；省略时从文件开头读取", false),
+                        new Param("limit", "integer", "最多读取多少行；最大 2000 行", false)
                 ),
                 args -> {
                     Path safe = pathGuard.resolveSafe(args.get("path"));
@@ -353,25 +354,50 @@ public class ToolRegistry {
         }
         boolean ranged = args.containsKey("offset") || args.containsKey("limit");
         if (!ranged) {
-            return "文件内容:\n" + Files.readString(file);
+            StringBuilder content = new StringBuilder();
+            try (java.io.Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+                char[] buffer = new char[8_192];
+                int remaining = MAX_READ_FILE_CHARS + 1;
+                while (remaining > 0) {
+                    int read = reader.read(buffer, 0, Math.min(buffer.length, remaining));
+                    if (read < 0) {
+                        break;
+                    }
+                    content.append(buffer, 0, read);
+                    remaining -= read;
+                }
+            }
+            if (content.length() > MAX_READ_FILE_CHARS) {
+                content.setLength(MAX_READ_FILE_CHARS);
+                content.append("\n...(内容已截断，请使用 offset/limit 分段读取)");
+            }
+            return "文件内容:\n" + content;
         }
 
         int offset = Math.max(1, parseInt(args.get("offset"), 1));
         int limit = Math.max(1, Math.min(parseInt(args.get("limit"), 200), MAX_READ_FILE_LINES));
-        List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
-        int total = lines.size();
+        List<String> lines = new ArrayList<>(limit);
+        int total = 0;
+        try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                total++;
+                if (total >= offset && lines.size() < limit) {
+                    lines.add(line);
+                }
+            }
+        }
         if (offset > total) {
             return "文件内容: " + file.getFileName() + " 共 " + total + " 行，offset 超出范围";
         }
 
-        int from = offset - 1;
-        int to = Math.min(from + limit, total);
+        int to = offset + lines.size() - 1;
         StringBuilder sb = new StringBuilder();
         sb.append("文件内容: ").append(file.getFileName())
                 .append(" (lines ").append(offset).append("-").append(to)
                 .append(" of ").append(total).append(")\n");
-        for (int i = from; i < to; i++) {
-            sb.append(String.format("%5d | %s%n", i + 1, lines.get(i)));
+        for (int i = 0; i < lines.size(); i++) {
+            sb.append(String.format("%5d | %s%n", offset + i, lines.get(i)));
         }
         if (to < total) {
             sb.append("...(已截断，可用 offset=").append(to + 1).append(" 继续读取)");
@@ -398,7 +424,7 @@ public class ToolRegistry {
                 }
                 Path relative = projectRoot.relativize(path);
                 if (matcher.matches(relative) || fileNameMatcher.matches(path.getFileName())) {
-                    matches.add(relative.toString());
+                    matches.add(displayPath(relative.toString()));
                 }
             }));
         } catch (Exception e) {
@@ -463,12 +489,13 @@ public class ToolRegistry {
         int rendered = 0;
         for (int i = 0; i < result.matches().size(); i++) {
             GrepMatch match = result.matches().get(i);
-            String matchHeader = (i + 1) + ". " + match.file() + ":" + match.lineNumber() + "\n";
+            String file = displayPath(match.file());
+            String matchHeader = (i + 1) + ". " + file + ":" + match.lineNumber() + "\n";
             if (sb.length() + matchHeader.length() > maxChars) {
                 truncatedByChars = true;
                 break;
             }
-            sb.append(i + 1).append(". ").append(match.file()).append(":").append(match.lineNumber()).append("\n");
+            sb.append(i + 1).append(". ").append(file).append(":").append(match.lineNumber()).append("\n");
             for (ContextLine line : match.context()) {
                 String marker = line.lineNumber() == match.lineNumber() ? ">" : " ";
                 String contextLine = String.format("   %s%5d | %s%n", marker, line.lineNumber(), line.text());
@@ -499,15 +526,24 @@ public class ToolRegistry {
         sb.append("\nsuggested_reads:");
         Set<String> seen = new LinkedHashSet<>();
         for (GrepMatch match : matches) {
-            if (seen.size() >= 3 || !seen.add(match.file())) {
+            String file = displayPath(match.file());
+            if (seen.size() >= 3 || !seen.add(file)) {
                 continue;
             }
             int offset = Math.max(1, match.lineNumber() - 20);
             sb.append("\n- read_file {\"path\":\"")
-                    .append(match.file().replace("\\", "\\\\").replace("\"", "\\\""))
+                    .append(file.replace("\"", "\\\""))
                     .append("\",\"offset\":").append(offset)
                     .append(",\"limit\":80}");
         }
+    }
+
+    private static String displayPath(String path) {
+        String normalized = path == null ? "" : path.replace('\\', '/');
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        return normalized;
     }
 
     /**
@@ -1426,8 +1462,7 @@ public class ToolRegistry {
 
             boolean finished = process.waitFor(commandTimeoutSeconds, TimeUnit.SECONDS);
             if (!finished) {
-                process.destroyForcibly();
-                process.waitFor(2, TimeUnit.SECONDS);
+                terminateProcessTree(process);
                 outputFuture.cancel(true);
                 return "命令执行超时（" + commandTimeoutSeconds + "秒），已强制终止";
             }
@@ -1436,18 +1471,60 @@ public class ToolRegistry {
             int exitCode = process.exitValue();
             return String.format("命令执行完成 (exit code: %d)\n%s", exitCode, output);
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
             if (process != null) {
-                process.destroyForcibly();
+                terminateProcessTree(process);
             }
+            Thread.currentThread().interrupt();
             return "用户取消了此次工具调用";
         } catch (Exception e) {
             if (process != null) {
-                process.destroyForcibly();
+                terminateProcessTree(process);
             }
             return "执行命令失败: " + e.getMessage();
         } finally {
             outputReaderExecutor.shutdownNow();
+        }
+    }
+
+    private static void terminateProcessTree(Process process) {
+        ProcessHandle root = process.toHandle();
+        List<ProcessHandle> descendants = root.descendants().toList();
+        List<ProcessHandle> handles = new ArrayList<>(descendants.size() + 1);
+
+        // 先结束后代进程，避免 Windows 下 shell 退出后子进程变成孤儿并继续占用工作目录。
+        for (int i = descendants.size() - 1; i >= 0; i--) {
+            ProcessHandle descendant = descendants.get(i);
+            handles.add(descendant);
+            if (descendant.isAlive()) {
+                descendant.destroyForcibly();
+            }
+        }
+        handles.add(root);
+        if (root.isAlive()) {
+            root.destroyForcibly();
+        }
+
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        boolean interrupted = false;
+        for (ProcessHandle handle : handles) {
+            if (!handle.isAlive()) {
+                continue;
+            }
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) {
+                break;
+            }
+            try {
+                handle.onExit().get(remaining, TimeUnit.NANOSECONDS);
+            } catch (InterruptedException e) {
+                interrupted = true;
+                break;
+            } catch (ExecutionException | TimeoutException ignored) {
+                break;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
         }
     }
 
