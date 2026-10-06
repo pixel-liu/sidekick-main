@@ -19,7 +19,7 @@ import java.util.stream.Collectors;
  * 职责：
  * 1. 持久化用户偏好、项目事实、关键决策等
  * 2. 支持关键词检索
- * 3. 自动去重（基于内容相似度）
+ * 3. 在相同作用域和项目内按内容去重
  * 4. 定期持久化到磁盘
  */
 public class LongTermMemory implements Memory {
@@ -54,10 +54,13 @@ public class LongTermMemory implements Memory {
     }
 
     @Override
-    public void store(MemoryEntry entry) {
-        // 去重检查：如果已存在内容完全相同的条目，跳过
+    public synchronized void store(MemoryEntry entry) {
+        // 全局记忆与项目记忆独立去重；不同项目可以保存相同事实。
         boolean duplicate = entries.values().stream()
-                .anyMatch(e -> e.getContent().equals(entry.getContent()));
+                .anyMatch(e -> e.getContent().equals(entry.getContent())
+                        && scopeOf(e).equals(scopeOf(entry))
+                        && ("global".equals(scopeOf(entry))
+                        || Objects.equals(e.getMetadata().get("project"), entry.getMetadata().get("project"))));
         if (duplicate) {
             return;
         }

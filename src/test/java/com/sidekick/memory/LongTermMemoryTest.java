@@ -42,6 +42,52 @@ class LongTermMemoryTest {
     }
 
     @Test
+    void shouldKeepIdenticalFactsInDifferentProjectsAfterReload() {
+        memory.store(new MemoryEntry("a", "使用 Java 17", MemoryEntry.MemoryType.FACT,
+                Map.of("scope", "project", "project", "/repo/a"), 5));
+        memory.store(new MemoryEntry("b", "使用 Java 17", MemoryEntry.MemoryType.FACT,
+                Map.of("scope", "project", "project", "/repo/b"), 5));
+
+        LongTermMemory reloaded = new LongTermMemory(tempDir.toFile());
+        assertEquals(2, reloaded.size());
+        assertEquals("a", reloaded.getAll("/repo/a").get(0).getId());
+        assertEquals("b", reloaded.getAll("/repo/b").get(0).getId());
+    }
+
+    @Test
+    void shouldDeduplicateWithinTheSameProject() {
+        Map<String, String> scope = Map.of("scope", "project", "project", "/repo/a");
+        memory.store(new MemoryEntry("a", "使用 Java 17", MemoryEntry.MemoryType.FACT, scope, 5));
+        memory.store(new MemoryEntry("duplicate", "使用 Java 17", MemoryEntry.MemoryType.FACT, scope, 5));
+
+        assertEquals(1, memory.size());
+        assertEquals(5, memory.getTokenCount());
+    }
+
+    @Test
+    void shouldKeepProjectAndGlobalFactsSeparateRegardlessOfSaveOrder() {
+        Map<String, String> project = Map.of("scope", "project", "project", "/repo/a");
+        Map<String, String> global = Map.of("scope", "global");
+        memory.store(new MemoryEntry("project-first", "使用 Java 17", MemoryEntry.MemoryType.FACT, project, 5));
+        memory.store(new MemoryEntry("global-second", "使用 Java 17", MemoryEntry.MemoryType.FACT, global, 5));
+        memory.store(new MemoryEntry("global-first", "使用 Maven", MemoryEntry.MemoryType.FACT, global, 5));
+        memory.store(new MemoryEntry("project-second", "使用 Maven", MemoryEntry.MemoryType.FACT, project, 5));
+
+        assertEquals(4, memory.size());
+        assertEquals(4, memory.getAll("/repo/a").size());
+        assertEquals(2, memory.getAll("/repo/b").size());
+    }
+
+    @Test
+    void shouldDeduplicateLegacyAndExplicitGlobalFacts() {
+        memory.store(new MemoryEntry("legacy", "使用 Java 17", MemoryEntry.MemoryType.FACT, null, 5));
+        memory.store(new MemoryEntry("global", "使用 Java 17", MemoryEntry.MemoryType.FACT,
+                Map.of("scope", "GLOBAL", "project", "/repo/a"), 5));
+
+        assertEquals(1, memory.size());
+    }
+
+    @Test
     void shouldSearchByKeywords() {
         memory.store(new MemoryEntry("f1", "用户偏好使用IntelliJ IDEA", MemoryEntry.MemoryType.FACT, null, 10));
         memory.store(new MemoryEntry("f2", "项目路径: /home/user/project", MemoryEntry.MemoryType.FACT, null, 10));

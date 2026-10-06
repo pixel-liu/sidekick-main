@@ -3,6 +3,7 @@ package com.sidekick.rag;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -12,19 +13,31 @@ import static org.junit.jupiter.api.Assertions.*;
 class VectorStoreTest {
 
     private VectorStore store;
+    @TempDir
+    Path tempDir;
+    private String previousRagDir;
     private static final String TEST_PROJECT = "/tmp/test-project";
 
     @BeforeEach
     void setUp() throws Exception {
-        System.setProperty("Sidekick.rag.dir", "/tmp/Sidekick-test-rag");
+        previousRagDir = System.getProperty("Sidekick.rag.dir");
+        System.setProperty("Sidekick.rag.dir", tempDir.resolve("rag").toString());
         store = new VectorStore(TEST_PROJECT);
         store.clearProject();
     }
 
     @AfterEach
     void tearDown() throws Exception {
-        if (store != null) {
-            store.close();
+        try {
+            if (store != null) {
+                store.close();
+            }
+        } finally {
+            if (previousRagDir == null) {
+                System.clearProperty("Sidekick.rag.dir");
+            } else {
+                System.setProperty("Sidekick.rag.dir", previousRagDir);
+            }
         }
     }
 
@@ -82,5 +95,52 @@ class VectorStoreTest {
 
         store.clearProject();
         assertEquals(0, store.getStats().chunkCount());
+    }
+
+    @Test
+    void replacesChunksAndRelationsTogetherWithoutChangingOtherProjects() throws Exception {
+        store.insertChunks(List.of(new VectorStore.CodeChunkEntry(CodeChunk.fileChunk("Old.java", "old"), new float[]{1})));
+        store.insertRelations(List.of(new CodeRelation("Old.java", "Old", null, "Parent", "extends")));
+        try (VectorStore other = new VectorStore("other-project")) {
+            other.insertChunks(List.of(new VectorStore.CodeChunkEntry(CodeChunk.fileChunk("Other.java", "other"), new float[]{1})));
+            other.insertRelations(List.of(new CodeRelation("Other.java", "Other", null, "Parent", "extends")));
+            store.replaceProjectIndex(
+                    List.of(new VectorStore.CodeChunkEntry(CodeChunk.fileChunk("New.java", "new"), new float[]{1})),
+                    List.of(new CodeRelation("New.java", "New", null, "Parent", "extends")));
+            assertTrue(store.searchByKeyword("old").isEmpty());
+            assertEquals(1, store.searchByKeyword("new").size());
+            assertTrue(store.getRelations("Old").isEmpty());
+            assertEquals(1, store.getRelations("New").size());
+            assertEquals(1, other.getStats().chunkCount());
+            assertEquals(1, other.getRelations("Other").size());
+        }
+    }
+
+    @Test
+    void rollsBackTheWholeReplacementWhenRelationInsertFails() throws Exception {
+        store.insertChunks(List.of(new VectorStore.CodeChunkEntry(CodeChunk.fileChunk("Old.java", "old"), new float[]{1})));
+        store.insertRelations(List.of(new CodeRelation("Old.java", "Old", null, "Parent", "extends")));
+        assertThrows(java.sql.SQLException.class, () -> store.replaceProjectIndex(
+                List.of(new VectorStore.CodeChunkEntry(CodeChunk.fileChunk("New.java", "new"), new float[]{1})),
+                List.of(new CodeRelation("New.java", "New", null, "Parent", null))));
+        assertEquals(1, store.searchByKeyword("old").size());
+        assertTrue(store.searchByKeyword("new").isEmpty());
+        assertEquals(1, store.getRelations("Old").size());
+        assertTrue(store.getRelations("New").isEmpty());
+        // 回滚后连接仍应可用于下一次成功重建。
+        store.replaceProjectIndex(List.of(), List.of());
+        assertEquals(0, store.getStats().chunkCount());
+        assertEquals(0, store.getStats().relationCount());
+    }
+
+    @Test
+    void preservesOldIndexWhenChunkPreparationThrowsARuntimeException() throws Exception {
+        store.insertChunks(List.of(new VectorStore.CodeChunkEntry(CodeChunk.fileChunk("Old.java", "old"), new float[]{1})));
+
+        assertThrows(NullPointerException.class, () -> store.replaceProjectIndex(
+                List.of(new VectorStore.CodeChunkEntry(null, new float[]{1})), List.of()));
+
+        assertEquals(1, store.searchByKeyword("old").size());
+        assertEquals(1, store.getStats().chunkCount());
     }
 }

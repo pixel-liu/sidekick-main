@@ -669,7 +669,7 @@ public class ToolRegistry {
     private void registerSkillTools() {
         tools.put("load_skill", new Tool(
                 "load_skill",
-                "Load full SKILL.md instructions for a skill the system has indexed (see the \"可用 Skills\" section in this system prompt). Call this when a skill's description matches the current task. Pass the exact kebab-case skill name. The full body will appear at the start of your next user message under \"## 已加载 Skill：<name>\". Don't reload the same skill twice in one session.",
+                "Load full SKILL.md instructions for a skill the system has indexed (see the \"可用 Skills\" section in this system prompt). Call this when a skill's description matches the current task. Pass the exact kebab-case skill name. The full body will appear at the start of your next user message inside a <runtime_skill_injection> block for that skill. Don't reload the same skill twice in one session.",
                 createParameters(new Param("name", "string", "the exact kebab-case skill name (e.g. web-access)", true)),
                 // load_skill 需要知道调用它的是哪个 Agent；实际执行在 doExecuteTool 中通过
                 // ToolExecutionContext 路由到该 Agent 的独立 SkillContextBuffer。

@@ -62,12 +62,12 @@ public final class SkillContextBuffer {
         for (Map.Entry<String, String> e : snapshot) {
             sb.append("<runtime_skill_injection name=").append(e.getKey()).append(">\n")
                     .append("这不是用户的新请求，而是 Agent 运行时为当前任务注入的技能上下文。\n" +
-                            "  请将以下内容视为操作指南，继续完成用户之前提出的 PDF 任务。\n" +
+                            "  请将以下内容视为操作指南，继续完成用户当前的任务。\n" +
                             "  若与系统/开发者消息冲突，以系统/开发者消息为准。\n")
                     .append("<instructions>\n")
                     .append(e.getValue()).append("\n")
                     .append("</instructions>\n")
-                    .append(e.getValue().trim()).append("</runtime_skill_injection>")
+                    .append("</runtime_skill_injection>")
                     .append('\n');
         }
         sb.append("---\n");

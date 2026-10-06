@@ -100,12 +100,14 @@ public class VectorStore implements AutoCloseable {
      * 批量插入代码块（事务保护）
      */
     public void insertChunks(List<CodeChunkEntry> entries) throws SQLException {
+        inTransaction(() -> insertChunkRows(entries));
+    }
+
+    private void insertChunkRows(List<CodeChunkEntry> entries) throws SQLException {
         String sql = """
                 INSERT INTO code_chunks (project_path, file_path, chunk_type, name, content, embedding_json)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """;
-        boolean autoCommit = connection.getAutoCommit();
-        connection.setAutoCommit(false);
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
             for (CodeChunkEntry entry : entries) {
                 ps.setString(1, projectPath);
@@ -117,12 +119,6 @@ public class VectorStore implements AutoCloseable {
                 ps.addBatch();
             }
             ps.executeBatch();
-            connection.commit();
-        } catch (SQLException e) {
-            connection.rollback();
-            throw e;
-        } finally {
-            connection.setAutoCommit(autoCommit);
         }
     }
 
@@ -130,12 +126,14 @@ public class VectorStore implements AutoCloseable {
      * 批量插入代码关系（事务保护）
      */
     public void insertRelations(List<CodeRelation> relations) throws SQLException {
+        inTransaction(() -> insertRelationRows(relations));
+    }
+
+    private void insertRelationRows(List<CodeRelation> relations) throws SQLException {
         String sql = """
                 INSERT INTO code_relations (project_path, from_file, from_name, to_file, to_name, relation_type)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """;
-        boolean autoCommit = connection.getAutoCommit();
-        connection.setAutoCommit(false);
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
             for (CodeRelation rel : relations) {
                 ps.setString(1, projectPath);
@@ -147,13 +145,41 @@ public class VectorStore implements AutoCloseable {
                 ps.addBatch();
             }
             ps.executeBatch();
+        }
+    }
+
+    /**
+     * 在同一个事务中替换项目的代码块和关系，任何写入失败均保留旧索引。
+     */
+    public void replaceProjectIndex(List<CodeChunkEntry> entries, List<CodeRelation> relations) throws SQLException {
+        inTransaction(() -> {
+            clearProject();
+            insertChunkRows(entries);
+            insertRelationRows(relations);
+        });
+    }
+
+    private void inTransaction(SqlAction action) throws SQLException {
+        boolean autoCommit = connection.getAutoCommit();
+        connection.setAutoCommit(false);
+        try {
+            action.run();
             connection.commit();
-        } catch (SQLException e) {
-            connection.rollback();
+        } catch (SQLException | RuntimeException e) {
+            try {
+                connection.rollback();
+            } catch (SQLException rollbackError) {
+                e.addSuppressed(rollbackError);
+            }
             throw e;
         } finally {
             connection.setAutoCommit(autoCommit);
         }
+    }
+
+    @FunctionalInterface
+    private interface SqlAction {
+        void run() throws SQLException;
     }
 
     /**

@@ -27,7 +27,7 @@ class LoadSkillToolTest {
         assertFalse(buffer.isEmpty());
         String drained = buffer.drain();
         assertTrue(drained.contains("when to fetch"));
-        assertTrue(drained.contains("已加载 Skill：web-access"));
+        assertTrue(drained.contains("<runtime_skill_injection name=web-access>"));
     }
 
     @Test

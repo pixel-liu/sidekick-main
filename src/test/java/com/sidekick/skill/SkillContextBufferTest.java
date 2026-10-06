@@ -20,6 +20,20 @@ class SkillContextBufferTest {
     }
 
     @Test
+    void injectsEachBodyOnceWithoutChangingTheUsersTask() {
+        SkillContextBuffer buffer = new SkillContextBuffer();
+        String body = "Fetch the requested web page.";
+        buffer.push("web-access", body);
+
+        String injected = buffer.drain();
+
+        assertEquals(injected.indexOf(body), injected.lastIndexOf(body));
+        assertTrue(injected.contains("<instructions>\n" + body + "\n</instructions>"));
+        assertFalse(injected.contains("PDF"));
+        assertTrue(injected.contains("继续完成用户当前的任务"));
+    }
+
+    @Test
     void clearResetsBuffer() {
         SkillContextBuffer buffer = new SkillContextBuffer();
         buffer.push("a", "body a");

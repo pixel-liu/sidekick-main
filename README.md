@@ -2,6 +2,8 @@
 
 一个成熟的 Java Agent CLI 产品，对标 Claude Code。
 
+项目迭代与验证记录见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 测试策略
 
 日常开发不需要每次都跑全量测试。`mvn clean package` 默认跳过测试，优先产出可手工验收的 jar；需要回归时按改动范围选择：
@@ -134,6 +136,7 @@ mvn test -DskipTests=false
 - 三层加载位置（按优先级，后者整体覆盖同名 skill）：jar 内置 < 用户级 `~/.Sidekick/skills/<name>/` < 项目级 `<project>/.Sidekick/skills/<name>/`
 - 启动期把启用 skill 的 `name` + `description` 注入三处 Agent 系统提示词索引段（启用上限 20 个，索引段 ≤ 4KB）
 - 内置工具 `load_skill(name)`：LLM 在 system prompt 看到匹配 description 时主动调用，Sidekick 把 SKILL.md 正文（5KB 截断）写入 `SkillContextBuffer`，下一轮 user message 自动前置注入
+- Skill 正文仅注入一次，操作指南始终围绕用户当前任务，不预设任务类型。
 - 内置 web-access skill：决策手册（浏览哲学四步法 + 工具选择表 + 浏览器优先级 + Jina 兜底说明）+ 6 个站点经验文件（mp.weixin / zhuanlan.zhihu / x.com / xiaohongshu / github / juejin）+ cdp-cheatsheet
 - frontmatter 走手写 YAML 子集解析，不引 SnakeYAML；解析失败 stderr 警告但不阻塞启动
 - CLI 命令：`/skill list` / `/skill show <name>` / `/skill on <name>` / `/skill off <name>` / `/skill reload`
@@ -227,6 +230,7 @@ export AGNES_BASE_URL=https://apihub.agnes-ai.com/v1
 长期记忆默认保存在用户目录下的 `~/.Sidekick/memory/long_term_memory.json`。
 长期记忆只保存显式保存意图下的稳定事实：`/save <事实>`，或用户在自然语言里明确说“记一下 / 记住 / 以后记得”时由 Agent 调用 `save_memory`。默认保存为当前项目作用域；跨项目通用偏好可用 `/save --global <事实>` 或 `save_memory(scope=global)`。它不应包含一次性任务请求或临时文件名/目录名。
 可用 `/memory list` 查看长期记忆，`/memory search <关键词>` 搜索当前项目可见记忆，`/memory delete <id>` 删除单条记忆。
+相同内容仅在同一作用域和同一项目内去重；不同项目、全局与项目作用域可以分别保存相同事实。
 
 项目级记忆使用 Markdown 文件维护，和 `/save` 的长期记忆分工不同：
 
@@ -237,6 +241,7 @@ export AGNES_BASE_URL=https://apihub.agnes-ai.com/v1
 
 可用 `/init` 为当前项目生成一份短 `PAI.md`。该命令默认不覆盖已有文件；确认需要重建时使用 `/init --force`。
 代码索引默认保存在 `~/.Sidekick/rag/codebase.db`。
+重建索引时，全部文件的分块、向量和关系准备成功后才会在单个事务中替换旧索引；遍历、向量生成或写入失败会保留原有索引并提示失败。
 调试日志默认滚动写入 `~/.Sidekick/logs/Sidekick.log`，旧日志会按保留天数和总容量自动清理。
 ReAct / Plan task / SubAgent / Planner 的模型 `reasoning_content` 会以 `LLM reasoning [...]` 形式写入该日志，便于排查模型为什么选择某个工具或路径。
 
