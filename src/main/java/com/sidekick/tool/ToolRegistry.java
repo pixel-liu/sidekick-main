@@ -671,37 +671,51 @@ public class ToolRegistry {
                 "load_skill",
                 "Load full SKILL.md instructions for a skill the system has indexed (see the \"可用 Skills\" section in this system prompt). Call this when a skill's description matches the current task. Pass the exact kebab-case skill name. The full body will appear at the start of your next user message under \"## 已加载 Skill：<name>\". Don't reload the same skill twice in one session.",
                 createParameters(new Param("name", "string", "the exact kebab-case skill name (e.g. web-access)", true)),
-                args -> {
-                    String name = args.get("name");
-                    if (name == null || name.isBlank()) {
-                        return "load_skill 失败: name 不能为空";
-                    }
-                    if (skillRegistry == null) {
-                        return "load_skill 失败: Skill 系统未初始化";
-                    }
-                    Skill skill = skillRegistry.findSkill(name);
-                    if (skill == null) {
-                        Skill any = skillRegistry.findAnySkill(name);
-                        if (any == null) {
-                            return "Skill '" + name + "' 未找到，可用 /skill list 查看可用 skill";
-                        }
-                        return "Skill '" + name + "' 已被禁用，可用 /skill on " + name + " 启用";
-                    }
-                    String body = skill.body();
-                    int originalLen = body == null ? 0 : body.length();
-                    int max = 5 * 1024;
-                    String injected = body == null ? "" : body;
-                    if (injected.length() > max) {
-                        injected = injected.substring(0, max)
-                                + "\n\n...(skill body truncated, full content via /skill show " + name + ")";
-                    }
-                    if (skillContextBuffer != null) {
-                        skillContextBuffer.push(name, injected);
-                    }
-                    return "已加载 skill '" + name + "' 的完整指引（" + originalLen
-                            + " bytes），将在下一轮上下文中以 <runtime_skill_injection name=" + name + "> 段出现。";
-                }
+                // load_skill 需要知道调用它的是哪个 Agent；实际执行在 doExecuteTool 中通过
+                // ToolExecutionContext 路由到该 Agent 的独立 SkillContextBuffer。
+                args -> "load_skill 必须通过 ToolRegistry 执行"
         ));
+    }
+
+    private String loadSkill(Map<String, String> args, ToolExecutionContext executionContext) {
+        String name = args.get("name");
+        if (name == null || name.isBlank()) {
+            return "load_skill 失败: name 不能为空";
+        }
+        if (skillRegistry == null) {
+            return "load_skill 失败: Skill 系统未初始化";
+        }
+        Skill skill = skillRegistry.findSkill(name);
+        if (skill == null) {
+            Skill any = skillRegistry.findAnySkill(name);
+            if (any == null) {
+                return "Skill '" + name + "' 未找到，可用 /skill list 查看可用 skill";
+            }
+            return "Skill '" + name + "' 已被禁用，可用 /skill on " + name + " 启用";
+        }
+
+        String body = skill.body();
+        int originalLen = body == null ? 0 : body.length();
+        int max = 5 * 1024;
+        String injected = body == null ? "" : body;
+        if (injected.length() > max) {
+            injected = injected.substring(0, max)
+                    + "\n\n...(skill body truncated, full content via /skill show " + name + ")";
+        }
+
+        SkillContextBuffer targetBuffer = executionContext == null || executionContext.skillContextBuffer() == null
+                ? skillContextBuffer
+                : executionContext.skillContextBuffer();
+        if (targetBuffer == null) {
+            return "load_skill 失败: 当前 Agent 的 Skill 注入缓存未初始化";
+        }
+        if (!targetBuffer.push(name, injected)) {
+            return "load_skill 失败: 待注入 Skill 正文已达到 "
+                    + SkillContextBuffer.MAX_TOTAL_BODY_CHARS + " 字符预算，当前剩余 "
+                    + targetBuffer.remainingBodyChars() + " 字符；请先让 Agent 消费已加载 Skill 后再加载。";
+        }
+        return "已加载 skill '" + name + "' 的完整指引（" + originalLen
+                + " bytes），将在下一轮上下文中以 <runtime_skill_injection name=" + name + "> 段出现。";
     }
 
     private void registerMemoryTools() {
@@ -1098,17 +1112,35 @@ public class ToolRegistry {
      * - 其他情况 → allow（仅表示工具调用真的发生过，工具内部的业务错误仍以返回字符串呈现给 LLM）
      */
     public String executeTool(String name, String argumentsJson) {
-        return doExecuteTool(name, argumentsJson).text();
+        return executeTool(name, argumentsJson, null);
+    }
+
+    /**
+     * 执行工具调用，并携带本次调用所属 Agent 的运行时上下文。
+     *
+     * <p>目前该上下文用于把 {@code load_skill} 的正文写入调用 Agent 的独立缓冲区；
+     * 不能通过修改 ToolRegistry 的全局字段来传递，否则并行 Agent 会互相覆盖。</p>
+     */
+    public String executeTool(String name, String argumentsJson, ToolExecutionContext executionContext) {
+        return doExecuteTool(name, argumentsJson, executionContext).text();
     }
 
     public ToolOutput executeToolOutput(String name, String argumentsJson) {
+        return executeToolOutput(name, argumentsJson, null);
+    }
+
+    public ToolOutput executeToolOutput(String name, String argumentsJson, ToolExecutionContext executionContext) {
         if (isLegacyExecuteToolOverride()) {
             return ToolOutput.text(executeTool(name, argumentsJson));
         }
-        return doExecuteTool(name, argumentsJson);
+        return doExecuteTool(name, argumentsJson, executionContext);
     }
 
     protected ToolOutput doExecuteTool(String name, String argumentsJson) {
+        return doExecuteTool(name, argumentsJson, null);
+    }
+
+    protected ToolOutput doExecuteTool(String name, String argumentsJson, ToolExecutionContext executionContext) {
         if (CancellationContext.isCancelled()) {
             return ToolOutput.text("用户取消了此次工具调用");
         }
@@ -1148,7 +1180,9 @@ public class ToolRegistry {
             Map<String, String> argMap = new HashMap<>();
             args.fields().forEachRemaining(entry ->
                     argMap.put(entry.getKey(), entry.getValue().asText()));
-            String result = tool.executor().execute(argMap);
+            String result = "load_skill".equals(name)
+                    ? loadSkill(argMap, executionContext)
+                    : tool.executor().execute(argMap);
             if (shouldAudit) {
                 auditLog.record(AuditLog.AuditEntry.allow(name, argumentsJson, elapsedMillis(start), auditMetadata));
             }
@@ -1260,6 +1294,15 @@ public class ToolRegistry {
      * 如果某个工具超过批次超时仍未返回，会取消任务并返回超时结果；已完成工具不受影响。
      */
     public List<ToolExecutionResult> executeTools(List<ToolInvocation> invocations) {
+        return executeTools(invocations, null);
+    }
+
+    /**
+     * 批量执行工具调用，并让整批调用共享同一个 Agent 运行时上下文。
+     * 即使工具批次内部并行，context 也是不可变引用，因此不会发生 Skill 缓冲区串写。
+     */
+    public List<ToolExecutionResult> executeTools(List<ToolInvocation> invocations,
+                                                  ToolExecutionContext executionContext) {
         if (invocations == null || invocations.isEmpty()) {
             return List.of();
         }
@@ -1271,7 +1314,7 @@ public class ToolRegistry {
         if (invocations.size() == 1) {
             ToolInvocation invocation = invocations.get(0);
             long startedAt = System.nanoTime();
-            ToolOutput output = executeToolOutput(invocation.name(), invocation.argumentsJson());
+            ToolOutput output = executeToolOutput(invocation.name(), invocation.argumentsJson(), executionContext);
             return List.of(ToolExecutionResult.completed(invocation, output, elapsedMillis(startedAt)));
         }
 
@@ -1289,7 +1332,7 @@ public class ToolRegistry {
                             return ToolExecutionResult.failed(invocation, "用户取消了此次工具调用");
                         }
                         long startedAt = System.nanoTime();
-                        ToolOutput output = executeToolOutput(invocation.name(), invocation.argumentsJson());
+                        ToolOutput output = executeToolOutput(invocation.name(), invocation.argumentsJson(), executionContext);
                         return ToolExecutionResult.completed(invocation, output, elapsedMillis(startedAt));
                     })
                     .toList();
@@ -1445,6 +1488,16 @@ public class ToolRegistry {
     public record Tool(String name, String description, JsonNode parameters, ToolExecutor executor) {}
 
     private record McpRegisteredTool(McpToolDescriptor descriptor, Function<String, ToolOutput> invoker) {}
+
+    /**
+     * 单次工具执行所属 Agent 的运行时上下文。
+     * 这不是全局配置：并行 Agent 必须各自传入自己的 SkillContextBuffer。
+     */
+    public record ToolExecutionContext(String agentId, SkillContextBuffer skillContextBuffer) {
+        public ToolExecutionContext {
+            agentId = agentId == null || agentId.isBlank() ? "unknown" : agentId.trim();
+        }
+    }
 
     public record ToolInvocation(String id, String name, String argumentsJson) {}
 

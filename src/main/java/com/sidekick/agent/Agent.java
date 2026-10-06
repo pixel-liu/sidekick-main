@@ -21,6 +21,7 @@ import com.sidekick.skill.SkillIndexFormatter;
 import com.sidekick.skill.SkillRegistry;
 import com.sidekick.util.AnsiStyle;
 import com.sidekick.tool.ToolRegistry;
+import com.sidekick.tool.ToolRegistry.ToolExecutionContext;
 import com.sidekick.tool.ToolRegistry.ToolExecutionResult;
 import com.sidekick.tool.ToolRegistry.ToolInvocation;
 import com.sidekick.util.TerminalMarkdownRenderer;
@@ -680,7 +681,8 @@ public class Agent {
         if (invocations.size() > 1) {
             log.info("Executing {} tool calls in parallel (iteration={})", invocations.size(), iteration);
         }
-        List<ToolExecutionResult> results = toolRegistry.executeTools(invocations);
+        List<ToolExecutionResult> results = toolRegistry.executeTools(invocations,
+                new ToolExecutionContext("react-agent", skillContextBuffer));
         for (ToolExecutionResult result : results) {
             log.debug("Tool result preview [{}]: {}", result.name(), preview(result.result(), 300));
             emitToolResultSummary(result);

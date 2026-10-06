@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sidekick.llm.LlmClient;
 import com.sidekick.memory.MemoryManager;
 import com.sidekick.runtime.CancellationContext;
+import com.sidekick.skill.SkillContextBuffer;
+import com.sidekick.skill.SkillRegistry;
 import com.sidekick.tool.ToolRegistry;
 import com.sidekick.util.AnsiStyle;
 import org.slf4j.Logger;
@@ -48,10 +50,14 @@ public class AgentOrchestrator {
     private final SubAgent planner;
     private final List<SubAgent> workers;
     private final SubAgent reviewer;
+    private final SkillContextBuffer plannerSkillContextBuffer = new SkillContextBuffer();
+    private final List<SkillContextBuffer> workerSkillContextBuffers;
+    private final SkillContextBuffer reviewerSkillContextBuffer = new SkillContextBuffer();
     private final MemoryManager memoryManager;
     private final ToolRegistry toolRegistry;
     private final PrintStream out;
     private Supplier<String> externalContextSupplier = () -> "";
+    private SkillRegistry skillRegistry;
 
     // 执行步骤的数据结构（package-private 供测试访问）
     record ExecutionStep(String id, String description, String type,
@@ -105,6 +111,12 @@ public class AgentOrchestrator {
                 new SubAgent("worker-2", AgentRole.WORKER, llmClient, toolRegistry)
         );
         this.reviewer = new SubAgent("reviewer", AgentRole.REVIEWER, llmClient, toolRegistry);
+        this.workerSkillContextBuffers = List.of(new SkillContextBuffer(), new SkillContextBuffer());
+        planner.setSkillContextBuffer(plannerSkillContextBuffer);
+        for (int i = 0; i < workers.size(); i++) {
+            workers.get(i).setSkillContextBuffer(workerSkillContextBuffers.get(i));
+        }
+        reviewer.setSkillContextBuffer(reviewerSkillContextBuffer);
         this.memoryManager = memoryManager;
     }
 
@@ -116,20 +128,23 @@ public class AgentOrchestrator {
     }
 
     /**
-     * 把 Skill 系统下发给所有 SubAgent。Multi-Agent 三个角色共享同一 SkillRegistry（索引一致），
-     * 但共享同一 SkillContextBuffer——简化实现，避免角色级 buffer 隔离的工程开销。
-     * 任务书 §3.6 描述的"角色独立 buffer"作为可观察的优化项暂未启用。
+     * 把 Skill 系统下发给所有 SubAgent。SkillRegistry（索引与正文来源）可以共享，
+     * 但每个 Agent 运行时都使用自己的 SkillContextBuffer，避免并行 Worker 争抢注入内容。
+     * 参数中的 buffer 保留仅为兼容既有调用方；Team 模式不会使用它作为共享注入队列。
      */
     public void setSkillSystem(com.sidekick.skill.SkillRegistry skillRegistry,
                                com.sidekick.skill.SkillContextBuffer skillContextBuffer) {
+        this.skillRegistry = skillRegistry;
         planner.setSkillRegistry(skillRegistry);
-        planner.setSkillContextBuffer(skillContextBuffer);
+        planner.setSkillContextBuffer(plannerSkillContextBuffer);
         for (SubAgent worker : workers) {
             worker.setSkillRegistry(skillRegistry);
-            worker.setSkillContextBuffer(skillContextBuffer);
+        }
+        for (int i = 0; i < workers.size(); i++) {
+            workers.get(i).setSkillContextBuffer(workerSkillContextBuffers.get(i));
         }
         reviewer.setSkillRegistry(skillRegistry);
-        reviewer.setSkillContextBuffer(skillContextBuffer);
+        reviewer.setSkillContextBuffer(reviewerSkillContextBuffer);
     }
 
     /**
@@ -194,6 +209,7 @@ public class AgentOrchestrator {
                 String context = buildStepContext(steps, step);
                 runStep(step, steps, retryCount, worker, reviewer, context, out);
                 worker.clearHistory();
+                worker.clearPendingSkillBodies();
             } else {
                 // 多步批次：真正并行执行，每步用独立的 PrintStream 缓冲，完成后按 step_id 顺序 flush
                 out.println("⚡ 批次 #" + batchIndex + "：" + executable.size()
@@ -429,6 +445,9 @@ public class AgentOrchestrator {
                 SubAgent worker = null;
                 SubAgent localReviewer = new SubAgent(
                         "reviewer-" + step.id(), AgentRole.REVIEWER, llmClient, toolRegistry);
+                localReviewer.setExternalContextSupplier(externalContextSupplier);
+                localReviewer.setSkillRegistry(skillRegistry);
+                localReviewer.setSkillContextBuffer(new SkillContextBuffer());
                 try {
                     worker = workerPool.take();
                     runStep(step, steps, retryCount, worker, localReviewer, context, stepOut);
@@ -443,6 +462,7 @@ public class AgentOrchestrator {
                 } finally {
                     if (worker != null) {
                         worker.clearHistory();
+                        worker.clearPendingSkillBodies();
                         workerPool.offer(worker);
                     }
                     stepOut.flush();
@@ -511,6 +531,7 @@ public class AgentOrchestrator {
         out.println("🔍 " + reviewer.getName() + " 正在审查步骤 [" + step.id() + "] 的结果...");
         AgentMessage reviewResult = reviewer.review(step.description(), result.content(), out);
         reviewer.clearHistory();
+        reviewer.clearPendingSkillBodies();
 
         if (reviewResult.type() == AgentMessage.Type.ERROR) {
             log.warn("Reviewer failed for step {}: {}", step.id(), reviewResult.content());
@@ -557,6 +578,7 @@ public class AgentOrchestrator {
             acceptedResult = retryResult.content();
             AgentMessage retryReview = reviewer.review(step.description(), acceptedResult, out);
             reviewer.clearHistory();
+            reviewer.clearPendingSkillBodies();
 
             if (retryReview.type() == AgentMessage.Type.ERROR) {
                 log.warn("Reviewer failed for step {} retry {}: {}", step.id(), retries, retryReview.content());

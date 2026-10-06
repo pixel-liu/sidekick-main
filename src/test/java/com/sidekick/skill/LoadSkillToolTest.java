@@ -31,6 +31,28 @@ class LoadSkillToolTest {
     }
 
     @Test
+    void executionContextRoutesSkillToCallingAgentsOwnBuffer(@TempDir Path tempDir) throws IOException {
+        SkillRegistry registry = registryWith(tempDir, "web-access", "决策手册", "worker-only instructions");
+        SkillContextBuffer legacySharedBuffer = new SkillContextBuffer();
+        SkillContextBuffer workerOneBuffer = new SkillContextBuffer();
+        SkillContextBuffer workerTwoBuffer = new SkillContextBuffer();
+        ToolRegistry tools = new ToolRegistry();
+        tools.setSkillRegistry(registry);
+        tools.setSkillContextBuffer(legacySharedBuffer);
+
+        tools.executeTool("load_skill", "{\"name\":\"web-access\"}",
+                new ToolRegistry.ToolExecutionContext("worker-1", workerOneBuffer));
+
+        assertTrue(legacySharedBuffer.isEmpty(), "显式执行上下文不能回退写入共享 buffer");
+        assertFalse(workerOneBuffer.isEmpty());
+        assertTrue(workerTwoBuffer.isEmpty());
+
+        String workerOneInjection = workerOneBuffer.drain();
+        assertTrue(workerOneInjection.contains("worker-only instructions"));
+        assertTrue(workerTwoBuffer.isEmpty(), "worker-2 不能消费 worker-1 的 Skill 正文");
+    }
+
+    @Test
     void failsForUnknownSkill(@TempDir Path tempDir) throws IOException {
         SkillRegistry registry = registryWith(tempDir, "real-one", "desc", "body");
         SkillContextBuffer buffer = new SkillContextBuffer();
@@ -80,6 +102,24 @@ class LoadSkillToolTest {
 
         String drained = buffer.drain();
         assertTrue(drained.contains("(skill body truncated"), "应包含截断标记");
+    }
+
+    @Test
+    void reportsBudgetExhaustionWithoutDiscardingAlreadyLoadedSkill(@TempDir Path tempDir) throws IOException {
+        String body = "x".repeat(5 * 1024);
+        SkillRegistry registry = registryWith(tempDir, "large", "desc", body);
+        SkillContextBuffer buffer = new SkillContextBuffer();
+        String existing = "existing".repeat((SkillContextBuffer.MAX_TOTAL_BODY_CHARS - 4 * 1024) / "existing".length());
+        assertTrue(buffer.push("already-loaded", existing));
+        ToolRegistry tools = new ToolRegistry();
+        tools.setSkillRegistry(registry);
+        tools.setSkillContextBuffer(buffer);
+
+        String result = tools.executeTool("load_skill", "{\"name\":\"large\"}");
+
+        assertTrue(result.contains("字符预算"), result);
+        assertEquals(1, buffer.size());
+        assertEquals(existing.length(), buffer.totalBodyChars());
     }
 
     @Test

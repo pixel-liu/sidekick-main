@@ -44,19 +44,35 @@ class SkillContextBufferTest {
     }
 
     @Test
-    void capsAtThreeSkills() {
+    void allowsMoreThanThreeSmallSkills() {
         SkillContextBuffer buffer = new SkillContextBuffer();
         buffer.push("a", "A");
         buffer.push("b", "B");
         buffer.push("c", "C");
         buffer.push("d", "D");
 
-        assertEquals(3, buffer.size());
+        assertEquals(4, buffer.size());
         String drained = buffer.drain();
-        assertFalse(drained.contains("# a"), "最旧的 skill 应被淘汰");
+        assertTrue(drained.contains("a"), "小 Skill 不应因数量被淘汰");
         assertTrue(drained.contains("b"));
         assertTrue(drained.contains("c"));
         assertTrue(drained.contains("d"));
+    }
+
+    @Test
+    void rejectsNewSkillThatExceedsTotalBodyBudgetWithoutEvictingExistingSkills() {
+        SkillContextBuffer buffer = new SkillContextBuffer();
+        String existing = "x".repeat(SkillContextBuffer.MAX_TOTAL_BODY_CHARS - 10);
+        String tooLarge = "y".repeat(11);
+        assertTrue(buffer.push("existing", existing));
+
+        assertFalse(buffer.push("too-large", tooLarge));
+        assertEquals(1, buffer.size());
+        assertEquals(existing.length(), buffer.totalBodyChars());
+
+        String drained = buffer.drain();
+        assertTrue(drained.contains(existing));
+        assertFalse(drained.contains(tooLarge));
     }
 
     @Test

@@ -12,7 +12,7 @@ import java.util.Map;
  *
  * 关键约束：
  * - drain 是一次性消费（防止跨轮重复注入）
- * - 同一会话内最多保留 3 个 skill body（上限 3 个，超出 LRU 淘汰最旧）
+ * - 不限制 Skill 数量；以待注入正文总字符数预算控制上下文体积，超额时拒绝本次加载，绝不静默淘汰已有 Skill
  * - 同一 skill 重复 push 会替换旧 body 并刷新到末尾，避免重复
  * - /clear 命令调 clear() 复位
  *
@@ -21,20 +21,31 @@ import java.util.Map;
  */
 public final class SkillContextBuffer {
 
-    private static final int MAX_SKILLS = 3;
+    /**
+     * 单次注入前累积的 Skill 正文总预算。以字符近似控制（约 4k token），
+     * 既允许多个小 Skill 同时存在，也不会让一次性注入挤占过多上下文。
+     */
+    public static final int MAX_TOTAL_BODY_CHARS = 16 * 1024;
 
     private final Map<String, String> entries = new LinkedHashMap<>();
 
-    public synchronized void push(String skillName, String body) {
+    /**
+     * 将 Skill 正文加入待注入队列。
+     *
+     * @return 是否成功加入；超过总正文预算时保持现有内容不变并返回 {@code false}
+     */
+    public synchronized boolean push(String skillName, String body) {
         if (skillName == null || skillName.isBlank() || body == null) {
-            return;
+            return false;
+        }
+        String existing = entries.get(skillName);
+        int prospectiveChars = totalBodyChars() - (existing == null ? 0 : existing.length()) + body.length();
+        if (prospectiveChars > MAX_TOTAL_BODY_CHARS) {
+            return false;
         }
         entries.remove(skillName);
         entries.put(skillName, body);
-        while (entries.size() > MAX_SKILLS) {
-            String oldest = entries.keySet().iterator().next();
-            entries.remove(oldest);
-        }
+        return true;
     }
 
     /**
@@ -69,6 +80,14 @@ public final class SkillContextBuffer {
 
     public synchronized int size() {
         return entries.size();
+    }
+
+    public synchronized int totalBodyChars() {
+        return entries.values().stream().mapToInt(String::length).sum();
+    }
+
+    public synchronized int remainingBodyChars() {
+        return Math.max(0, MAX_TOTAL_BODY_CHARS - totalBodyChars());
     }
 
     public synchronized void clear() {

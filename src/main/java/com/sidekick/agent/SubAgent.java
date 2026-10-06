@@ -15,6 +15,7 @@ import com.sidekick.skill.SkillContextBuffer;
 import com.sidekick.skill.SkillIndexFormatter;
 import com.sidekick.skill.SkillRegistry;
 import com.sidekick.tool.ToolRegistry;
+import com.sidekick.tool.ToolRegistry.ToolExecutionContext;
 import com.sidekick.tool.ToolRegistry.ToolExecutionResult;
 import com.sidekick.tool.ToolRegistry.ToolInvocation;
 import com.sidekick.util.AnsiStyle;
@@ -202,6 +203,7 @@ public class SubAgent {
             // 调 LLM 前评估 conversationHistory 是否接近 window 上限；超阈值压缩早期消息为摘要。
             injectPendingLspDiagnostics(out);
             maybeCompactHistory(out);
+            injectPendingSkillBodies();
 
             try {
                 LlmClient.ChatResponse response = llmClient.chat(
@@ -291,6 +293,13 @@ public class SubAgent {
         conversationHistory.add(systemMsg);
     }
 
+    /** 清理本 Agent 尚未注入的 Skill 正文，防止独立任务之间串上下文。 */
+    public void clearPendingSkillBodies() {
+        if (skillContextBuffer != null) {
+            skillContextBuffer.clear();
+        }
+    }
+
     private void pruneHistoricalImagePayloads() {
         int messageCount = 0;
         int imageCount = 0;
@@ -340,7 +349,17 @@ public class SubAgent {
         if (invocations.size() > 1) {
             log.info("[{}] executing {} tool calls in parallel", name, invocations.size());
         }
-        return toolRegistry.executeTools(invocations);
+        return toolRegistry.executeTools(invocations, new ToolExecutionContext(name, skillContextBuffer));
+    }
+
+    private void injectPendingSkillBodies() {
+        if (skillContextBuffer == null || skillContextBuffer.isEmpty()) {
+            return;
+        }
+        String drained = skillContextBuffer.drain();
+        if (!drained.isBlank()) {
+            conversationHistory.add(LlmClient.Message.user(drained));
+        }
     }
 
     private void appendImageToolMessages(List<ToolExecutionResult> toolResults) {

@@ -18,6 +18,7 @@ import com.sidekick.skill.SkillIndexFormatter;
 import com.sidekick.skill.SkillRegistry;
 import com.sidekick.util.AnsiStyle;
 import com.sidekick.tool.ToolRegistry;
+import com.sidekick.tool.ToolRegistry.ToolExecutionContext;
 import com.sidekick.tool.ToolRegistry.ToolExecutionResult;
 import com.sidekick.tool.ToolRegistry.ToolInvocation;
 import com.sidekick.util.TerminalMarkdownRenderer;
@@ -485,6 +486,7 @@ public class PlanExecuteAgent {
             // 调 LLM 前评估 messages 是否接近 window 上限；超阈值压缩早期消息为摘要。
             injectPendingLspDiagnostics(messages, out);
             maybeCompactHistory(messages, out);
+            injectPendingSkillBodies(messages);
 
             LlmClient.ChatResponse response = llmClient.chat(
                     messages,
@@ -613,11 +615,22 @@ public class PlanExecuteAgent {
         if (invocations.size() > 1) {
             log.info("Task {} executing {} tool calls in parallel", taskId, invocations.size());
         }
-        List<ToolExecutionResult> results = toolRegistry.executeTools(invocations);
+        List<ToolExecutionResult> results = toolRegistry.executeTools(invocations,
+                new ToolExecutionContext("plan-task-" + taskId, skillContextBuffer));
         for (ToolExecutionResult result : results) {
             log.debug("Task {} tool result preview [{}]: {}", taskId, result.name(), preview(result.result(), 300));
         }
         return results;
+    }
+
+    private void injectPendingSkillBodies(List<LlmClient.Message> messages) {
+        if (skillContextBuffer == null || skillContextBuffer.isEmpty()) {
+            return;
+        }
+        String drained = skillContextBuffer.drain();
+        if (!drained.isBlank()) {
+            messages.add(LlmClient.Message.user(drained));
+        }
     }
 
     private void appendImageToolMessages(List<LlmClient.Message> messages, List<ToolExecutionResult> toolResults) {
