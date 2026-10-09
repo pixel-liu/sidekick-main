@@ -12,6 +12,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -23,8 +25,8 @@ import java.util.stream.Collectors;
  * 职责：
  * 1. 持久化用户偏好、项目事实、关键决策等
  * 2. 支持关键词检索
- * 3. 在相同作用域和项目内按内容去重
- * 4. 定期持久化到磁盘
+ * 3. 在相同作用域和项目内按归一化内容哈希去重
+ * 4. 按保留分控制容量，变更后即时持久化到磁盘
  */
 public class LongTermMemory implements Memory {
     private static final Logger log = LoggerFactory.getLogger(LongTermMemory.class);
@@ -35,12 +37,33 @@ public class LongTermMemory implements Memory {
     private final AtomicInteger tokenCounter;
     private final ObjectMapper mapper;
     private final File storageFile;
+    private final int maxEntries;
+    private final int maxTokens;
+    private final Clock clock;
+
+    private record DedupKey(String scope, String project, String contentHash) {}
+    private final Map<DedupKey, String> hashIndex = new HashMap<>();
 
     public LongTermMemory() {
         this(resolveStorageDir());
     }
 
     public LongTermMemory(File storageDir) {
+        this(storageDir, positiveProperty("Sidekick.memory.max.entries", 1000),
+                positiveProperty("Sidekick.memory.max.tokens", Integer.MAX_VALUE));
+    }
+
+    public LongTermMemory(File storageDir, int maxEntries, int maxTokens) {
+        this(storageDir, maxEntries, maxTokens, Clock.systemUTC());
+    }
+
+    LongTermMemory(File storageDir, int maxEntries, int maxTokens, Clock clock) {
+        if (maxEntries <= 0 || maxTokens <= 0) {
+            throw new IllegalArgumentException("Memory capacity must be positive");
+        }
+        this.maxEntries = maxEntries;
+        this.maxTokens = maxTokens;
+        this.clock = Objects.requireNonNull(clock);
         this.entries = new ConcurrentHashMap<>();
         this.tokenCounter = new AtomicInteger(0);
         this.mapper = new ObjectMapper();
@@ -59,24 +82,26 @@ public class LongTermMemory implements Memory {
 
     @Override
     public synchronized void store(MemoryEntry entry) {
-        // 全局记忆与项目记忆独立去重；不同项目可以保存相同事实。
-        boolean duplicate = entries.values().stream()
-                .anyMatch(e -> e.getContent().equals(entry.getContent())
-                        && scopeOf(e).equals(scopeOf(entry))
-                        && ("global".equals(scopeOf(entry))
-                        || Objects.equals(e.getMetadata().get("project"), entry.getMetadata().get("project"))));
-        if (duplicate) {
-            return;
+        Objects.requireNonNull(entry);
+        DedupKey key = dedupKey(entry);
+        String existingId = hashIndex.get(key);
+        if (existingId != null) {
+            MemoryEntry existing = entries.get(existingId);
+            entries.put(existingId, existing.mergeScores(entry, clock.instant()));
+        } else {
+            MemoryEntry replaced = entries.put(entry.getId(), entry);
+            if (replaced != null) {
+                hashIndex.remove(dedupKey(replaced));
+            }
+            hashIndex.put(key, entry.getId());
         }
-
-        entries.put(entry.getId(), entry);
-        tokenCounter.addAndGet(entry.getTokenCount());
-        // 即时持久化
+        enforceCapacity();
         saveToDisk();
     }
 
     @Override
-    public Optional<MemoryEntry> retrieve(String id) {
+    public synchronized Optional<MemoryEntry> retrieve(String id) {
+        recordAccess(List.of(id));
         return Optional.ofNullable(entries.get(id));
     }
 
@@ -85,10 +110,10 @@ public class LongTermMemory implements Memory {
         return search(query, limit, null);
     }
 
-    public List<MemoryEntry> search(String query, int limit, String projectKey) {
+    public synchronized List<MemoryEntry> search(String query, int limit, String projectKey) {
         Set<String> queryTokens = MemoryQueryTokenizer.tokenize(query);
 
-        return entries.values().stream()
+        List<MemoryEntry> results = entries.values().stream()
                 .filter(entry -> isVisibleInProject(entry, projectKey))
                 .filter(entry -> {
                     if (MemoryQueryTokenizer.matches(entry.getContent(), queryTokens)) {
@@ -99,6 +124,8 @@ public class LongTermMemory implements Memory {
                 })
                 .limit(limit)
                 .collect(Collectors.toList());
+        recordAccess(results.stream().map(MemoryEntry::getId).toList());
+        return results.stream().map(entry -> entries.get(entry.getId())).toList();
     }
 
     @Override
@@ -116,6 +143,7 @@ public class LongTermMemory implements Memory {
     public synchronized boolean delete(String id) {
         MemoryEntry removed = entries.remove(id);
         if (removed != null) {
+            hashIndex.remove(dedupKey(removed));
             tokenCounter.addAndGet(-removed.getTokenCount());
             saveToDisk();
             return true;
@@ -126,6 +154,7 @@ public class LongTermMemory implements Memory {
     @Override
     public synchronized void clear() {
         entries.clear();
+        hashIndex.clear();
         tokenCounter.set(0);
         saveToDisk();
     }
@@ -220,14 +249,94 @@ public class LongTermMemory implements Memory {
             for (Map<String, Object> data : dataList) {
                 MemoryEntry entry = mapToEntry(data);
                 if (entry != null) {
-                    entries.put(entry.getId(), entry);
-                    tokenCounter.addAndGet(entry.getTokenCount());
+                    DedupKey key = dedupKey(entry);
+                    String existingId = hashIndex.get(key);
+                    if (existingId != null) {
+                        MemoryEntry existing = entries.get(existingId);
+                        Instant newest = existing.getUpdatedAt().isAfter(entry.getUpdatedAt())
+                                ? existing.getUpdatedAt() : entry.getUpdatedAt();
+                        entries.put(existingId, existing.mergeScores(entry, newest));
+                    } else {
+                        MemoryEntry replaced = entries.put(entry.getId(), entry);
+                        if (replaced != null) hashIndex.remove(dedupKey(replaced));
+                        hashIndex.put(key, entry.getId());
+                    }
                 }
             }
+            enforceCapacity();
+            saveToDisk();
             log.info("加载了 {} 条长期记忆", entries.size());
         } catch (IOException e) {
             log.warn("加载长期记忆失败: {}", e.getMessage(), e);
         }
+    }
+
+    private static Instant parseInstant(Object value, Instant fallback) {
+        return value instanceof String text && !text.isBlank() ? Instant.parse(text) : fallback;
+    }
+
+    private static int positiveProperty(String name, int fallback) {
+        try {
+            int value = Integer.parseInt(System.getProperty(name, Integer.toString(fallback)));
+            return value > 0 ? value : fallback;
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static DedupKey dedupKey(MemoryEntry entry) {
+        String scope = scopeOf(entry);
+        return new DedupKey(scope, "project".equals(scope) ? entry.getMetadata().get("project") : null,
+                entry.getContentHash());
+    }
+
+    /** Count only returned recalls, never administrative list/scoring scans. */
+    public synchronized List<MemoryEntry> recordAccess(Collection<String> ids) {
+        boolean changed = false;
+        Instant now = clock.instant();
+        List<MemoryEntry> recalled = new ArrayList<>();
+        for (String id : new LinkedHashSet<>(ids)) {
+            MemoryEntry entry = entries.get(id);
+            if (entry != null) {
+                MemoryEntry updated = entry.recalled(now);
+                entries.put(id, updated);
+                recalled.add(updated);
+                changed = true;
+            }
+        }
+        if (changed) saveToDisk();
+        return recalled;
+    }
+
+    private void enforceCapacity() {
+        long tokens = entries.values().stream().mapToLong(MemoryEntry::getTokenCount).sum();
+        if (entries.size() <= maxEntries && tokens <= maxTokens) {
+            tokenCounter.set((int) tokens);
+            return;
+        }
+        Instant now = clock.instant();
+        List<MemoryEntry> weakestFirst = entries.values().stream()
+                .sorted(Comparator.comparingDouble((MemoryEntry entry) -> retentionScore(entry, now))
+                        .thenComparing(MemoryEntry::getUpdatedAt)
+                        .thenComparing(MemoryEntry::getTimestamp)
+                        .thenComparing(MemoryEntry::getId))
+                .toList();
+        for (MemoryEntry entry : weakestFirst) {
+            if (entries.size() <= maxEntries && tokens <= maxTokens) break;
+            entries.remove(entry.getId());
+            hashIndex.remove(dedupKey(entry));
+            tokens -= entry.getTokenCount();
+        }
+        tokenCounter.set((int) tokens);
+    }
+
+    /** Bounded components prevent very frequent recalls from overwhelming quality scores. */
+    private static double retentionScore(MemoryEntry entry, Instant now) {
+        double frequency = entry.getAccessCount() / (entry.getAccessCount() + 5.0);
+        double ageDays = Math.max(0, Duration.between(entry.getUpdatedAt(), now).toSeconds() / 86400.0);
+        double recency = 1.0 / (1.0 + ageDays / 30.0);
+        return 0.4 * entry.getImportance() + 0.3 * entry.getConfidence()
+                + 0.15 * frequency + 0.15 * recency;
     }
 
     private Map<String, Object> entryToMap(MemoryEntry entry) {
@@ -238,6 +347,12 @@ public class LongTermMemory implements Memory {
         map.put("timestamp", entry.getTimestamp().toString());
         map.put("metadata", entry.getMetadata());
         map.put("tokenCount", entry.getTokenCount());
+        map.put("content_hash", entry.getContentHash());
+        map.put("importance", entry.getImportance());
+        map.put("confidence", entry.getConfidence());
+        map.put("access_count", entry.getAccessCount());
+        map.put("updated_at", entry.getUpdatedAt().toString());
+        map.put("last_accessed_at", entry.getLastAccessedAt() == null ? null : entry.getLastAccessedAt().toString());
         return map;
     }
 
@@ -258,7 +373,14 @@ public class LongTermMemory implements Memory {
                 ((Map<String, Object>) metaObj).forEach((k, v) -> metadata.put(k, String.valueOf(v)));
             }
             int tokenCount = map.get("tokenCount") instanceof Number n ? n.intValue() : MemoryEntry.estimateTokens(content);
-            return new MemoryEntry(id, content, type, timestamp, metadata, tokenCount);
+            double importance = map.get("importance") instanceof Number n ? n.doubleValue() : 0.5;
+            double confidence = map.get("confidence") instanceof Number n ? n.doubleValue() : 0.5;
+            long accessCount = map.get("access_count") instanceof Number n ? n.longValue() : 0;
+            Instant updatedAt = parseInstant(map.get("updated_at"), timestamp);
+            Instant lastAccessedAt = parseInstant(map.get("last_accessed_at"), null);
+            // Recompute the hash from content rather than trusting a stale persisted hash.
+            return new MemoryEntry(id, content, type, timestamp, metadata, tokenCount,
+                    importance, confidence, accessCount, updatedAt, lastAccessedAt);
         } catch (Exception e) {
             return null;
         }

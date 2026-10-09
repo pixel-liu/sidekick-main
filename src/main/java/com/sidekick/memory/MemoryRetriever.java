@@ -48,11 +48,15 @@ public class MemoryRetriever {
         }
 
         // 按分数降序排序
-        return scored.stream()
+        List<ScoredEntry> selected = scored.stream()
                 .sorted(Comparator.comparingDouble(ScoredEntry::score).reversed())
                 .limit(limit)
-                .map(ScoredEntry::entry)
                 .collect(Collectors.toList());
+        Map<String, MemoryEntry> recalled = longTermMemory.recordAccess(selected.stream()
+                .filter(entry -> !entry.fromShortTerm()).map(entry -> entry.entry().getId()).toList())
+                .stream().collect(Collectors.toMap(MemoryEntry::getId, entry -> entry));
+        return selected.stream().map(entry -> entry.fromShortTerm() ? entry.entry()
+                : recalled.getOrDefault(entry.entry().getId(), entry.entry())).toList();
     }
 
     /**
@@ -66,6 +70,11 @@ public class MemoryRetriever {
     }
 
     public List<MemoryEntry> retrieveLongTerm(String query, int limit, String projectKey) {
+        List<MemoryEntry> selected = selectLongTerm(query, limit, projectKey);
+        return longTermMemory.recordAccess(selected.stream().map(MemoryEntry::getId).toList());
+    }
+
+    private List<MemoryEntry> selectLongTerm(String query, int limit, String projectKey) {
         return longTermMemory.getAll().stream()
                 .filter(entry -> LongTermMemory.isVisibleInProject(entry, projectKey))
                 .map(entry -> new ScoredEntry(entry, computeRelevanceScore(entry, query) * 1.2, false))
@@ -84,12 +93,13 @@ public class MemoryRetriever {
     }
 
     public String buildContextForQuery(String query, int maxTokens, String projectKey) {
-        List<MemoryEntry> relevant = retrieveLongTerm(query, 10, projectKey);
+        List<MemoryEntry> relevant = selectLongTerm(query, 10, projectKey);
         if (relevant.isEmpty()) return "";
 
         StringBuilder context = new StringBuilder();
         context.append("## 相关长期记忆\n\n");
 
+        List<String> recalledIds = new ArrayList<>();
         int usedTokens = 0;
         for (MemoryEntry entry : relevant) {
             if (usedTokens + entry.getTokenCount() > maxTokens) break;
@@ -97,8 +107,10 @@ public class MemoryRetriever {
             context.append("- [").append(entry.getType()).append("] ")
                     .append(entry.getContent()).append("\n");
             usedTokens += entry.getTokenCount();
+            recalledIds.add(entry.getId());
         }
 
+        longTermMemory.recordAccess(recalledIds);
         context.append("\n");
         return context.toString();
     }

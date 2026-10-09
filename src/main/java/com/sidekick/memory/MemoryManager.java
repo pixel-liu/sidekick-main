@@ -131,6 +131,10 @@ public class MemoryManager {
     }
 
     public void storeFact(String fact, String scope) {
+        storeFact(fact, scope, 0.5, 0.5);
+    }
+
+    public void storeFact(String fact, String scope, double importance, double confidence) {
         String normalizedScope = normalizeScope(scope);
         Map<String, String> metadata = "global".equals(normalizedScope)
                 ? Map.of("source", "fact", "scope", "global")
@@ -141,7 +145,7 @@ public class MemoryManager {
                 MemoryEntry.MemoryType.FACT,
                 metadata,
                 MemoryEntry.estimateTokens(fact)
-        );
+        ).withScores(importance, confidence);
         longTermMemory.store(entry);
     }
 
