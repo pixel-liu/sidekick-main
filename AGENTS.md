@@ -13,4 +13,4 @@ Read SideKick.md for the shared architecture and development commands.
 - Enforce Sidekick.memory.max.entries (default 1000) and optional Sidekick.memory.max.tokens after saves and startup migration using the documented retention score.
 - Count only returned recalls or memories actually injected into the model context. Administrative list/scoring scans must not affect recall statistics.
 - Maintain compatibility with legacy JSON; persist via same-directory temporary file and atomic replacement.
-- Validate memory changes with: mvn test "-Dtest=MemoryEntryTest,LongTermMemoryTest,LongTermMemoryRetentionTest,MemoryRetrieverTest,MemoryManagerTest,ToolRegistryTest" -DskipTests=false
+- Validate memory changes with: mvn test "-Dtest=MemoryEntryTest,LongTermMemoryTest,LongTermMemoryRetentionTest,MemoryRetrieverTest,MemoryManagerTest,ToolRegistryTest,PromptAssemblerTest" -DskipTests=false

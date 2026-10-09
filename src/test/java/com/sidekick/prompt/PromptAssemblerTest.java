@@ -76,6 +76,25 @@ class PromptAssemblerTest {
     }
 
     @Test
+    void omitsToolInstructionsFromCrLfPromptOverride() throws Exception {
+        Path projectPrompts = tempDir.resolve("crlf-project");
+        Files.createDirectories(projectPrompts);
+        Files.writeString(projectPrompts.resolve("base.md"),
+                "## Language\r\n中文\r\n## Tools\r\nread_file tool\r\n"
+                        + "## Tool Policy\r\ncall tools\r\n## Browser Policy\r\nbrowser rules\r\n");
+        PromptAssembler assembler = new PromptAssembler(new PromptRepository(
+                tempDir.resolve("user"), projectPrompts));
+
+        String prompt = assembler.assemble(PromptMode.AGENT,
+                PromptContext.builder().toolsEnabled(false).build());
+
+        assertFalse(prompt.contains("## Tools"));
+        assertFalse(prompt.contains("## Tool Policy"));
+        assertFalse(prompt.contains("read_file tool"));
+        assertTrue(prompt.contains("## Browser Policy"));
+        assertTrue(prompt.contains("## Tool Availability"));
+    }
+    @Test
     void baseOverrideMustKeepLanguageSection() throws Exception {
         Path projectPrompts = tempDir.resolve("project");
         Files.createDirectories(projectPrompts);
