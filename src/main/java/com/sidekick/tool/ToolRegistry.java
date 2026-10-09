@@ -96,6 +96,7 @@ public class ToolRegistry {
     private BrowserGuard browserGuard;
     private BrowserConnector browserConnector;
     private BiConsumer<String, String> memorySaver;
+    private ScoredMemorySaver scoredMemorySaver;
     private SkillRegistry skillRegistry;
     private SkillContextBuffer skillContextBuffer;
     private java.util.function.BiConsumer<String, String[]> writeFileObserver = (p, ba) -> {};
@@ -176,10 +177,22 @@ public class ToolRegistry {
     }
 
     public void setMemorySaver(Consumer<String> memorySaver) {
+        this.scoredMemorySaver = null;
         this.memorySaver = memorySaver == null ? null : (fact, scope) -> memorySaver.accept(fact);
     }
 
+    @FunctionalInterface
+    public interface ScoredMemorySaver {
+        void save(String fact, String scope, double importance, double confidence);
+    }
+
+    public void setScoredMemorySaver(ScoredMemorySaver saver) {
+        this.scoredMemorySaver = saver;
+        this.memorySaver = saver == null ? null : (fact, scope) -> saver.save(fact, scope, 0.5, 0.5);
+    }
+
     public void setScopedMemorySaver(BiConsumer<String, String> memorySaver) {
+        this.scoredMemorySaver = null;
         this.memorySaver = memorySaver;
     }
 
@@ -760,7 +773,9 @@ public class ToolRegistry {
                 "当且仅当用户明确说“记一下”“记住”“以后记得”或要求保存长期偏好/稳定事实时调用，把精炼事实写入长期记忆；scope 默认 project，跨项目偏好才用 global；不要保存一次性任务请求、临时文件名或模型猜测。",
                 createParameters(
                         new Param("fact", "string", "要长期保存的稳定事实或用户偏好，必须精炼、可跨会话复用", true),
-                        new Param("scope", "string", "记忆作用域：project 或 global。默认 project；跨项目长期偏好才用 global", false)
+                        new Param("scope", "string", "记忆作用域：project 或 global。默认 project；跨项目长期偏好才用 global", false),
+                        new Param("importance", "number", "重要性，0 到 1，默认 0.5", false),
+                        new Param("confidence", "number", "事实置信度，0 到 1，默认 0.5", false)
                 ),
                 args -> {
                     String fact = args.get("fact");
@@ -772,7 +787,17 @@ public class ToolRegistry {
                     }
                     String normalized = fact.trim();
                     String scope = "global".equalsIgnoreCase(args.get("scope")) ? "global" : "project";
-                    memorySaver.accept(normalized, scope);
+                    double importance = Double.parseDouble(args.getOrDefault("importance", "0.5"));
+                    double confidence = Double.parseDouble(args.getOrDefault("confidence", "0.5"));
+                    if (!Double.isFinite(importance) || importance < 0 || importance > 1
+                            || !Double.isFinite(confidence) || confidence < 0 || confidence > 1) {
+                        return "保存长期记忆失败: importance 和 confidence 必须在 0 到 1 之间";
+                    }
+                    if (scoredMemorySaver != null) {
+                        scoredMemorySaver.save(normalized, scope, importance, confidence);
+                    } else {
+                        memorySaver.accept(normalized, scope);
+                    }
                     return "💾 已保存到长期记忆(" + scope + "): " + normalized;
                 }
         ));

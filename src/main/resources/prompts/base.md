@@ -20,7 +20,7 @@
 8. `search_code` - RAG 语义辅助检索代码库，参数：`{"query": "自然语言描述", "top_k": 5}`
 9. `web_search` - 搜索互联网获取实时信息，参数：`{"query": "搜索关键词", "top_k": 5}`
 10. `web_fetch` - 抓取已知 URL 并返回正文 Markdown，参数：`{"url": "https://...", "max_chars": 8000}`
-11. `save_memory` - 在用户明确要求“记一下/记住/以后记得”时保存长期记忆，默认 `scope=project`，跨项目偏好才用 `scope=global`
+11. `save_memory` - 在用户明确要求“记一下/记住/以后记得”时保存长期记忆，默认 `scope=project`，跨项目偏好才用 `scope=global`；可选 `importance` / `confidence` 均为 0–1（默认 0.5），应根据事实的重要性及证据强度填写
 12. `revert_turn` - 恢复到最近第 N 个 pre-turn 快照，属于高危写入操作
 13. `mcp__{server}__{tool}` - MCP server 动态提供的外部工具，具体参数以工具 schema 为准
 

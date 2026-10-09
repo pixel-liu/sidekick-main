@@ -79,6 +79,24 @@ Agent 可使用 `read_file`、`write_file`、`list_dir`、`glob_files`、`grep_c
 
 MCP 配置文件不存在时会创建默认 Chrome DevTools 配置。自定义 MCP server 可使用 stdio `command` 或 Streamable HTTP `url`；配置中的 `${PROJECT_DIR}`、`${HOME}` 和环境变量会在启动时展开。
 
+## 长期记忆容量与去重
+
+长期记忆在原有字段之外存储 `content_hash`、`importance`、`confidence`、`access_count`、`updated_at` 和 `last_accessed_at`。两项评分范围为 0–1，默认均为 0.5；`save_memory` 工具支持可选的 `importance` / `confidence` 参数，Java 调用可使用 `storeFact(fact, scope, importance, confidence)`。
+
+正文经过 Unicode NFC 归一化后，以 UTF-8 编码计算 SHA-256；大小写和空白仍有区别。在同一作用域和项目内按哈希去重，重复保存保留原 ID、正文、创建时间及召回次数，分别取新旧 importance/confidence 的较大值并刷新 updated_at。全局与项目记忆、不同项目之间仍独立存储。
+
+容量配置使用 JVM 系统属性，需放在 `-jar` 前：
+
+```bash
+java -DSidekick.memory.max.entries=1000 -DSidekick.memory.max.tokens=128000 -jar target/Sidekick-1.0-SNAPSHOT.jar
+```
+
+`max_entries` 默认 1000；token 预算默认 `Integer.MAX_VALUE`，可通过上面的 `Sidekick.memory.max.tokens` 配置。上限均为正整数，对整个长期记忆文件生效。每次保存和启动加载后检查容量，超限时按保留分从低到高淘汰，直到同时满足两项上限；新写入记录也参与排序，单条超过 token 上限时可能立即被淘汰。
+
+保留分为 `0.40 × importance + 0.30 × confidence + 0.15 × frequency + 0.15 × recency`，其中 `frequency = access_count / (access_count + 5)`，`recency = 1 / (1 + 距 updated_at 的天数 / 30)`。同分时先淘汰更新时间更早的记录，再按创建时间和 ID 确定顺序。
+
+实际按 ID 读取、搜索返回或模型召回会增加 access_count，并刷新 updated_at / last_accessed_at；列表查看和候选评分扫描不增加计数。构造模型上下文时仅统计实际进入 token 预算的记录。旧 JSON 自动补齐默认字段、重建哈希索引，并按当前容量上限迁移；这可能在启动时淘汰旧记录。保存继续使用同目录临时文件与原子替换。
+
 ## Runtime API
 
 Runtime API 仅监听本机地址，必须配置密钥：
