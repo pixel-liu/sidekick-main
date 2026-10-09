@@ -3060,11 +3060,12 @@ public class Main {
         String capabilities = "ReAct · Plan · MCP · Browser · Image · Tools · Memory · RAG";
         String state = mcp + " · " + skills + " · ReAct";
         List<String> lines = new ArrayList<>(List.of(
-                "   " + AnsiStyle.section("████████") + "  " + AnsiStyle.section("█  █") + "    " + AnsiStyle.emphasis("π  Sidekick") + " " + AnsiStyle.subtle("v" + VERSION),
-                "   " + AnsiStyle.section("█      ") + "  " + AnsiStyle.section("█ █ ") + "    " + AnsiStyle.subtle(ready),
-                "   " + AnsiStyle.section("████████") + "  " + AnsiStyle.section("██  ") + "    " + AnsiStyle.subtle(state),
-                "   " + AnsiStyle.section("      █") + "  " + AnsiStyle.section("█ █ ") + "    " + AnsiStyle.subtle(capabilities),
-                "   " + AnsiStyle.section("████████") + "  " + AnsiStyle.section("█  █"),
+                "   " + AnsiStyle.section(" ██████╗  ██╗  ██╗") + "    " + AnsiStyle.emphasis("π  Sidekick") + " " + AnsiStyle.subtle("v" + VERSION),
+                "   " + AnsiStyle.section("██╔════╝  ██║ ██╔╝") + "    " + AnsiStyle.subtle(ready),
+                "   " + AnsiStyle.section("╚█████╗   █████╔╝ ") + "    " + AnsiStyle.subtle(state),
+                "   " + AnsiStyle.section(" ╚═══██╗  ██╔═██╗ ") + "    " + AnsiStyle.subtle(capabilities),
+                "   " + AnsiStyle.section("██████╔╝  ██║  ██╗"),
+                "   " + AnsiStyle.section("╚═════╝   ╚═╝  ╚═╝"),
                 "",
                 "Tips for getting started:",
                 "1. Type " + AnsiStyle.emphasis("/") + " for commands and Tab completion",

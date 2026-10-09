@@ -61,7 +61,7 @@ class MainInputNormalizationTest {
         assertTrue(lines.stream().anyMatch(line -> line.contains("Sidekick")));
         assertTrue(lines.stream().anyMatch(line -> line.contains("π")));
         assertTrue(lines.stream().anyMatch(line -> line.contains("v16.1.0")));
-        assertTrue(lines.stream().anyMatch(line -> line.contains("████████")));
+        assertTrue(lines.stream().anyMatch(line -> line.contains("Model auto (model)")));
         assertTrue(lines.stream().anyMatch(line -> line.contains("Tips for getting started")));
         assertTrue(lines.stream().anyMatch(line -> line.contains("@path")));
         assertTrue(lines.stream().noneMatch(line -> line.contains("for shortcuts")));
