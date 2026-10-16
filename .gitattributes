@@ -1,2 +1,4 @@
 distribution/bin/sidekick text eol=lf
 distribution/bin/sidekick.cmd text eol=crlf
+scripts/install.sh text eol=lf
+scripts/install.ps1 text eol=crlf

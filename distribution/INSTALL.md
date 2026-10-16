@@ -1,6 +1,26 @@
 # SideKick 安装
 
-SideKick 需要 Java 17 或更高版本。解压发行包后，将其中的 `bin` 目录加入 `PATH`。
+SideKick 需要 Java 17 或更高版本。安装器会下载最新 GitHub Release、安装程序并配置命令路径，但不会配置或复制任何 API Key。
+
+## 自动安装
+
+Windows PowerShell：
+
+```powershell
+irm https://raw.githubusercontent.com/pixel-liu/sidekick-main/main/scripts/install.ps1 | iex
+```
+
+macOS / Linux：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/pixel-liu/sidekick-main/main/scripts/install.sh | bash
+```
+
+运行远程脚本前可以先打开对应 URL 检查内容。Windows 默认安装到 `%LOCALAPPDATA%\SideKick` 并加入用户 PATH；macOS/Linux 默认安装到 `~/.local/share/sidekick`，在 `~/.local/bin` 创建命令链接，并在需要时更新 shell profile。
+
+## 手动安装
+
+解压发行包后，将其中的 `bin` 目录加入 `PATH`。
 
 ## Windows
 

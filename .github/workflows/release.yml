@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Resolve release version
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Unsupported release tag: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Run quick regression suite
+        run: mvn -B test -Pquick
+
+      - name: Build release archives
+        run: mvn -B clean package -Ddistribution.version="$VERSION"
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd target
+          sha256sum "sidekick-$VERSION.zip" "sidekick-$VERSION.tar.gz" > "sidekick-$VERSION-sha256.txt"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "target/sidekick-$VERSION.zip" \
+            "target/sidekick-$VERSION.tar.gz" \
+            "target/sidekick-$VERSION-sha256.txt" \
+            "scripts/install.ps1" \
+            "scripts/install.sh" \
+            --verify-tag \
+            --generate-notes \
+            --title "SideKick $GITHUB_REF_NAME"

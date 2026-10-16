@@ -2,6 +2,26 @@
 
 按日期倒序记录项目变更、验证结果和待处理问题。
 
+## 2026-10-16 — 安装脚本与 GitHub Release 第二版
+
+### 已完成
+
+- 增加 Windows PowerShell 安装器，支持安装最新或指定 GitHub Release、校验下载文件 SHA-256、本地归档冒烟测试、Java 17 检查、安全替换旧版本，以及幂等写入用户 PATH。
+- 增加 macOS/Linux 安装器，支持相同的版本、校验和与本地归档安装流程，默认安装到用户目录、创建 `~/.local/bin/sidekick` 链接，并按需更新 shell profile。
+- 增加版本标签触发的 GitHub Actions 发布流程：运行 quick 回归、构建带版本号的 ZIP/tar.gz、生成 SHA-256 文件并创建 GitHub Release。
+- Maven 发行包名称与根目录支持通过 `distribution.version` 覆盖；README 和发行包安装说明补充一键安装、手动安装及 API Key 边界。
+
+### 验证结果
+
+- `mvn clean package "-Ddistribution.version=1.0.0"` 构建成功，ZIP 与 tar.gz 的文件名和包内根目录均正确使用 `1.0.0`。
+- Windows 安装器通过 PowerShell 语法解析、本地 ZIP 首次安装及覆盖升级冒烟；测试使用 `-NoPathUpdate`，未改动当前账户 PATH。
+- macOS/Linux 安装器通过 WSL `bash -n`、Java 11 拒绝路径、本地 tar.gz 首次安装与覆盖升级、命令软链接及隔离 HOME 下的 shell profile PATH 更新冒烟。
+- `mvn test -Pquick`：740 项测试通过，0 失败、0 错误；`git diff --check` 通过。GitHub Release 工作流需在推送首个版本标签后完成线上验证。
+
+### 遗留与边界
+
+- 本轮按需求暂不增加 `sidekick doctor`，也不提供 Docker 镜像；安装器仍要求系统预先安装 Java 17 或更高版本。
+
 ## 2026-10-16 — 本机命令发行包第一版
 
 ### 已完成

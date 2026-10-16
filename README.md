@@ -26,6 +26,20 @@ sidekick
 
 启动脚本不会切换工作目录，因此 SideKick 会将运行命令时所在的目录作为项目根。Windows、macOS 和 Linux 的详细安装步骤见发行包内的 `INSTALL.md`。
 
+发布 GitHub Release 后可以使用安装脚本完成下载、安装和 PATH 配置：
+
+```powershell
+# Windows PowerShell
+irm https://raw.githubusercontent.com/pixel-liu/sidekick-main/main/scripts/install.ps1 | iex
+```
+
+```bash
+# macOS / Linux；运行远程脚本前可以先打开 URL 检查内容
+curl -fsSL https://raw.githubusercontent.com/pixel-liu/sidekick-main/main/scripts/install.sh | bash
+```
+
+安装器只安装程序并配置命令路径，不会写入或分发 API Key。每位用户仍需通过自己的环境变量、项目 `.env` 或用户主目录 `.env` 配置模型密钥。
+
 从源码构建还需要 Maven：
 
 ```bash
@@ -49,7 +63,7 @@ mvn clean package
 java -jar target/Sidekick-1.0-SNAPSHOT.jar
 ```
 
-发行产物为 `target/sidekick-1.0-SNAPSHOT.zip` 和 `target/sidekick-1.0-SNAPSHOT.tar.gz`，均包含可执行启动脚本、fat JAR、安装说明和环境变量示例。
+发行产物为 `target/sidekick-1.0-SNAPSHOT.zip` 和 `target/sidekick-1.0-SNAPSHOT.tar.gz`，均包含可执行启动脚本、fat JAR、安装说明和环境变量示例。发布构建可通过 `-Ddistribution.version=1.0.0` 覆盖发行包版本号。
 
 启动后可以直接描述任务，例如“读取 pom.xml 并说明项目结构”。复杂任务使用：
 
