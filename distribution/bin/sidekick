@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -e
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SIDEKICK_HOME="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+SIDEKICK_JAR="$SIDEKICK_HOME/lib/sidekick.jar"
+
+if [[ ! -f "$SIDEKICK_JAR" ]]; then
+  echo "[SideKick] Missing application JAR: $SIDEKICK_JAR" >&2
+  exit 1
+fi
+
+if ! command -v java >/dev/null 2>&1; then
+  echo "[SideKick] Java was not found. Install Java 17 or newer and add it to PATH." >&2
+  exit 1
+fi
+
+exec java -jar "$SIDEKICK_JAR" "$@"

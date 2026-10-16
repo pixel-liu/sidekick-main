@@ -12,7 +12,9 @@
 
 ### 验证结果
 
-- 待完成构建、归档内容及启动器冒烟验证。
+- `mvn clean package` 构建成功，生成 `sidekick-1.0-SNAPSHOT.zip` 与 `sidekick-1.0-SNAPSHOT.tar.gz`；归档结构、fat JAR 主类及 tar.gz 中启动器的 `0755` 权限均符合预期。
+- 从 ZIP 解压后运行 Windows 启动器，能够跨目录定位并启动 `lib/sidekick.jar`；隔离用户配置后按预期进入应用的“缺少 API Key”退出路径。macOS/Linux 启动器通过 WSL `bash -n` 语法检查。
+- `mvn test -Pquick`：740 项测试通过，0 失败、0 错误；`git diff --check` 通过。
 
 ### 遗留与边界
 

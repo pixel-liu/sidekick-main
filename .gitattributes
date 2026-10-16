@@ -1,0 +1,2 @@
+distribution/bin/sidekick text eol=lf
+distribution/bin/sidekick.cmd text eol=crlf
