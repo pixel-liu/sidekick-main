@@ -17,11 +17,13 @@
 - Windows 安装器通过 PowerShell 语法解析、本地 ZIP 首次安装及覆盖升级冒烟；测试使用 `-NoPathUpdate`，未改动当前账户 PATH。
 - macOS/Linux 安装器通过 WSL `bash -n`、Java 11 拒绝路径、本地 tar.gz 首次安装与覆盖升级、命令软链接及隔离 HOME 下的 shell profile PATH 更新冒烟。
 - 首次 `v1.0.0` 标签运行发现 Linux CI 会在 ANSI 样式已初始化时把终端控制码计入表格行长断言；测试现按可见文本宽度判断，不再依赖测试类执行顺序。
-- `mvn test -Pquick`：740 项测试通过，0 失败、0 错误；`git diff --check` 通过。修复后的 GitHub Release 工作流将使用 `v1.0.1` 标签完成线上验证。
+- `mvn test -Pquick`：740 项测试通过，0 失败、0 错误；`git diff --check` 通过。
+- `v1.0.1` GitHub Release 工作流在线运行成功，正式 Release 已生成，包含 Windows/macOS/Linux 安装脚本、ZIP、tar.gz 及同时覆盖两个归档的 SHA-256 校验文件。
 
 ### 遗留与边界
 
 - 本轮按需求暂不增加 `sidekick doctor`，也不提供 Docker 镜像；安装器仍要求系统预先安装 Java 17 或更高版本。
+- 线上完整 ZIP 下载验收因当前环境连接 GitHub Release CDN 速度过慢而中止；已清理不完整下载。本地 ZIP/tar.gz 安装、线上 Linux 构建和 Release 资产生成均已分别验证。
 
 ## 2026-10-16 — 本机命令发行包第一版
 
