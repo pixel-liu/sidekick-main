@@ -13,9 +13,20 @@ SideKick 是一个面向本地开发工作的 Java Agent CLI，提供 ReAct、�
 - **模型与运行时**：可在 GLM、DeepSeek、StepFun、Kimi、FreeLLMAPI、Agnes 间切换；支持后台任务与本地 Runtime API。
 - **安全控制**：路径围栏、命令拦截、人工审批、操作审计和 Side-Git 快照回滚。
 
-## 快速开始
+## 安装与快速开始
 
-要求：JDK 17、Maven，以及至少一个模型服务的 API Key。代码语义检索默认还需要本地 Ollama 与 `nomic-embed-text:latest`；不使用 `/index`、`/search` 时可以跳过。
+要求：Java 17 或更高版本，以及至少一个模型服务的 API Key。代码语义检索默认还需要本地 Ollama 与 `nomic-embed-text:latest`；不使用 `/index`、`/search` 时可以跳过。
+
+从发行包安装时，解压后将其中的 `bin` 目录加入 `PATH`，然后在目标项目目录运行：
+
+```bash
+cd path/to/your-project
+sidekick
+```
+
+启动脚本不会切换工作目录，因此 SideKick 会将运行命令时所在的目录作为项目根。Windows、macOS 和 Linux 的详细安装步骤见发行包内的 `INSTALL.md`。
+
+从源码构建还需要 Maven：
 
 ```bash
 # macOS / Linux
@@ -31,12 +42,14 @@ Copy-Item .env.example .env
 GLM_API_KEY=your_api_key_here
 ```
 
-构建并启动：
+构建完成后既可以直接启动 JAR，也可以解压生成的发行包：
 
 ```bash
 mvn clean package
 java -jar target/Sidekick-1.0-SNAPSHOT.jar
 ```
+
+发行产物为 `target/sidekick-1.0-SNAPSHOT.zip` 和 `target/sidekick-1.0-SNAPSHOT.tar.gz`，均包含可执行启动脚本、fat JAR、安装说明和环境变量示例。
 
 启动后可以直接描述任务，例如“读取 pom.xml 并说明项目结构”。复杂任务使用：
 
