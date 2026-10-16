@@ -16,7 +16,8 @@
 - `mvn clean package "-Ddistribution.version=1.0.0"` 构建成功，ZIP 与 tar.gz 的文件名和包内根目录均正确使用 `1.0.0`。
 - Windows 安装器通过 PowerShell 语法解析、本地 ZIP 首次安装及覆盖升级冒烟；测试使用 `-NoPathUpdate`，未改动当前账户 PATH。
 - macOS/Linux 安装器通过 WSL `bash -n`、Java 11 拒绝路径、本地 tar.gz 首次安装与覆盖升级、命令软链接及隔离 HOME 下的 shell profile PATH 更新冒烟。
-- `mvn test -Pquick`：740 项测试通过，0 失败、0 错误；`git diff --check` 通过。GitHub Release 工作流需在推送首个版本标签后完成线上验证。
+- 首次 `v1.0.0` 标签运行发现 Linux CI 会在 ANSI 样式已初始化时把终端控制码计入表格行长断言；测试现按可见文本宽度判断，不再依赖测试类执行顺序。
+- `mvn test -Pquick`：740 项测试通过，0 失败、0 错误；`git diff --check` 通过。修复后的 GitHub Release 工作流将使用 `v1.0.1` 标签完成线上验证。
 
 ### 遗留与边界
 

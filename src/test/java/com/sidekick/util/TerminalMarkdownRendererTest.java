@@ -6,10 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TerminalMarkdownRendererTest {
-    static {
-        System.setProperty("Sidekick.render.color", "false");
-    }
-
     @Test
     void rendersHeadingListTableAndCodeBlockToTerminalFriendlyText() {
         String markdown = """
@@ -101,7 +97,12 @@ class TerminalMarkdownRendererTest {
         assertTrue(rendered.contains("| 特性"));
         assertFalse(rendered.contains("https://api.deepseek.com/chat/completions |"));
         for (String line : rendered.split("\\R")) {
-            assertTrue(line.length() <= 72, "line exceeds table width: " + line);
+            String visibleLine = stripAnsi(line);
+            assertTrue(visibleLine.length() <= 72, "line exceeds table width: " + visibleLine);
         }
+    }
+
+    private static String stripAnsi(String value) {
+        return value.replaceAll("\u001B\\[[;\\d]*m", "");
     }
 }
