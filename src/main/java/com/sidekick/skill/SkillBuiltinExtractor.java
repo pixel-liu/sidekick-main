@@ -13,7 +13,7 @@ import java.util.List;
  * 解压策略：通过 .version 文件标记当前 jar 内置版本。版本一致跳过；不一致或缺失则覆盖整个目录。
  *
  * 内置 skill 文件清单为硬编码（避免 jar 内 resource walk 的跨平台问题），
- * 当前覆盖：web-access（含浏览器参考资料）与 debugging。
+ * 当前覆盖：web-access（含浏览器参考资料）、debugging 与 code-review。
  */
 public final class SkillBuiltinExtractor {
 
@@ -31,7 +31,8 @@ public final class SkillBuiltinExtractor {
                     "references/site-patterns/xiaohongshu.com.md",
                     "references/site-patterns/zhuanlan.zhihu.com.md"
             )),
-            new BuiltinSkillSpec("debugging", List.of("SKILL.md"))
+            new BuiltinSkillSpec("debugging", List.of("SKILL.md")),
+            new BuiltinSkillSpec("code-review", List.of("SKILL.md"))
     );
 
     private final Path cacheRoot;

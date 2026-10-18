@@ -90,8 +90,11 @@ java -jar target/Sidekick-1.0-SNAPSHOT.jar
 
 - `web-access`：联网搜索、网页读取与浏览器工具选择。
 - `debugging`：排查运行异常、测试或构建失败、卡死、超时、偶发故障与性能退化，按证据定位原因并验证修复。
+- `code-review`：审查改动、提交、分支、PR 或指定模块，结合调用关系检查正确性、兼容性、数据、并发、安全及性能，按证据和影响报告问题。
 
 直接描述问题，例如“定位并修复这个测试失败”，Agent 会根据任务按需调用 `load_skill`。`/skill show debugging` 查看完整排查指南，`/skill off debugging` 可禁用。
+
+审查时可描述“review 当前未提交改动”或指定分支、提交及 PR。`/skill show code-review` 查看审查指南；仅要求审查时不自动修改代码或发布评论。
 
 内置 skill 随程序解压到 `~/.sidekick/skills-cache/`。可在 `~/.sidekick/skills/<name>/SKILL.md` 或项目 `.sidekick/skills/<name>/SKILL.md` 定制；项目级优先于用户级，用户级优先于内置。不要直接修改缓存目录。
 

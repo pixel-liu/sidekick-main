@@ -3,6 +3,8 @@ package com.sidekick.skill;
 import com.sidekick.tool.ToolRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -12,21 +14,22 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class SkillBuiltinExtractorTest {
 
-    @Test
-    void debuggingIsDiscoverableAndInjectedWithoutTruncation(@TempDir Path tempDir) throws IOException {
+    @ParameterizedTest
+    @ValueSource(strings = {"debugging", "code-review"})
+    void builtinIsDiscoverableAndInjectedWithoutTruncation(String name, @TempDir Path tempDir) throws IOException {
         Path cache = tempDir.resolve("cache");
         SkillBuiltinExtractor extractor = new SkillBuiltinExtractor(cache);
         extractor.extractAll();
 
         String source;
-        try (var in = getClass().getResourceAsStream("/skills/debugging/SKILL.md")) {
-            assertNotNull(in, "debugging 必须随程序打包");
+        try (var in = getClass().getResourceAsStream("/skills/" + name + "/SKILL.md")) {
+            assertNotNull(in, name + " 必须随程序打包");
             source = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
         }
-        assertEquals(source, Files.readString(cache.resolve("debugging/SKILL.md")));
+        assertEquals(source, Files.readString(cache.resolve(name + "/SKILL.md")));
         var parsed = SkillFrontmatterParser.parse(source);
         assertTrue(parsed.warnings().isEmpty(), parsed.warnings().toString());
-        assertEquals("debugging", parsed.frontmatter().get("name"));
+        assertEquals(name, parsed.frontmatter().get("name"));
         assertFalse(parsed.frontmatter().get("description").toString().isBlank());
         assertFalse(parsed.body().isBlank());
         assertTrue(parsed.body().length() <= 5 * 1024, "正文必须能被 load_skill 完整注入");
@@ -35,35 +38,72 @@ class SkillBuiltinExtractorTest {
                 new SkillStateStore(tempDir.resolve("skills.json")));
         registry.reload();
         assertTrue(registry.warnings().isEmpty(), registry.warnings().toString());
-        Skill skill = registry.findSkill("debugging");
+        Skill skill = registry.findSkill(name);
         assertNotNull(skill);
         assertEquals(Skill.Source.BUILTIN, skill.source());
         assertEquals(parsed.body(), skill.body());
+        assertTrue(SkillIndexFormatter.format(registry.enabledSkills()).contains("**" + name + "**"));
 
         SkillContextBuffer buffer = new SkillContextBuffer();
         ToolRegistry tools = new ToolRegistry();
         tools.setSkillRegistry(registry);
         tools.setSkillContextBuffer(buffer);
-        String result = tools.executeTool("load_skill", "{\"name\":\"debugging\"}");
-        assertTrue(result.contains("已加载 skill 'debugging'"), result);
+        String result = tools.executeTool("load_skill", "{\"name\":\"" + name + "\"}");
+        assertTrue(result.contains("已加载 skill '" + name + "'"), result);
         assertTrue(buffer.drain().contains(skill.body()), "实际注入必须包含完整正文");
         assertTrue(buffer.isEmpty(), "正文只能消费一次");
     }
 
     @Test
-    void addsDebuggingBesideExistingCurrentVersionCache(@TempDir Path tempDir) throws IOException {
-        Path existing = tempDir.resolve("web-access");
-        Files.createDirectories(existing);
-        Files.writeString(existing.resolve(".version"), SkillBuiltinExtractor.CURRENT_VERSION);
-        Files.writeString(existing.resolve("SKILL.md"), "existing cache");
+    void addsCodeReviewBesideExistingCurrentVersionCaches(@TempDir Path tempDir) throws IOException {
+        for (String name : new String[]{"web-access", "debugging"}) {
+            Path existing = tempDir.resolve(name);
+            Files.createDirectories(existing);
+            Files.writeString(existing.resolve(".version"), SkillBuiltinExtractor.CURRENT_VERSION);
+            Files.writeString(existing.resolve("SKILL.md"), "existing cache for " + name);
+        }
 
         SkillBuiltinExtractor extractor = new SkillBuiltinExtractor(tempDir);
         extractor.extractAll();
 
-        assertEquals("existing cache", Files.readString(existing.resolve("SKILL.md")));
-        assertTrue(Files.isRegularFile(tempDir.resolve("debugging/SKILL.md")));
+        for (String name : new String[]{"web-access", "debugging"}) {
+            assertEquals("existing cache for " + name, Files.readString(tempDir.resolve(name + "/SKILL.md")));
+        }
+        assertTrue(Files.isRegularFile(tempDir.resolve("code-review/SKILL.md")));
         assertEquals(SkillBuiltinExtractor.CURRENT_VERSION,
-                Files.readString(tempDir.resolve("debugging/.version")).trim());
+                Files.readString(tempDir.resolve("code-review/.version")).trim());
+    }
+
+    @Test
+    void codeReviewHonorsOverridesAndDisableStateButIgnoresBackup(@TempDir Path tempDir) throws IOException {
+        Path cache = tempDir.resolve("cache");
+        new SkillBuiltinExtractor(cache).extractAll();
+        Path project = tempDir.resolve("project");
+        Path override = project.resolve("code-review/SKILL.md");
+        Files.createDirectories(override.getParent());
+        Files.writeString(override.resolveSibling("SKILL.md.pre-builtin.bak"), "legacy backup");
+        SkillStateStore state = new SkillStateStore(tempDir.resolve("skills.json"));
+        SkillRegistry registry = new SkillRegistry(cache, null, project, state);
+        registry.reload();
+        assertEquals(Skill.Source.BUILTIN, registry.findSkill("code-review").source());
+
+        Files.writeString(override, "---\nname: code-review\ndescription: project review\n---\nproject body\n");
+        registry.reload();
+        assertEquals(Skill.Source.PROJECT, registry.findSkill("code-review").source());
+        assertEquals("project body\n", registry.findSkill("code-review").body());
+
+        state.disable("code-review");
+        assertNull(registry.findSkill("code-review"));
+        assertFalse(SkillIndexFormatter.format(registry.enabledSkills()).contains("**code-review**"));
+        SkillContextBuffer buffer = new SkillContextBuffer();
+        ToolRegistry tools = new ToolRegistry();
+        tools.setSkillRegistry(registry);
+        tools.setSkillContextBuffer(buffer);
+        assertTrue(tools.executeTool("load_skill", "{\"name\":\"code-review\"}").contains("已被禁用"));
+        assertTrue(buffer.isEmpty());
+
+        state.enable("code-review");
+        assertEquals(Skill.Source.PROJECT, registry.findSkill("code-review").source());
     }
 
     @Test

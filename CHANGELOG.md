@@ -2,6 +2,30 @@
 
 按日期倒序记录项目变更、验证结果和待处理问题。
 
+## 2026-10-18 — 内置 code-review Skill
+
+### 已完成
+
+- 新增 `src/main/resources/skills/code-review/SKILL.md`，支持工作区、提交、分支、PR 及指定模块审查，明确比较基准、调用关系追踪和范围边界。
+- 覆盖正确性、兼容性、数据持久化、并发与资源、安全权限、性能可靠性、测试有效性及变更完整性；每条发现要求位置、触发条件、错误机制与影响，按证据和 P0–P3 优先级交付。
+- 区分确定缺陷、待确认疑点和风格偏好；避免混入未受影响的历史问题、重复报告或为凑数量降低标准。仅审查不自动授权代码修改、推送或外部评论。
+- 在 `SkillBuiltinExtractor` 注册第三个内置 skill，沿用现有三层覆盖、启停与完整正文注入机制；同步 README、AGENTS.md、SideKick.md。
+- 将内置资源集成检查参数化覆盖 `debugging` 和 `code-review`，补充索引可见性、项目覆盖、禁用后无法注入、备份文件不被加载，以及已有两个同版本缓存旁新增 skill 的检查。
+
+### 验证结果
+
+- `mvn test "-Dtest=Skill*Test,LoadSkillToolTest" -DskipTests=false`：51 项通过，0 失败、0 错误、0 跳过。
+- `skill-creator/scripts/quick_validate.py src/main/resources/skills/code-review`：通过；正文低于 `load_skill` 的 5,120 字符限制，实际注入完整性由集成测试验证。
+- `mvn package -DskipTests=true`：构建成功；测试验证由上面的专项命令独立完成。
+- 校验可执行 JAR、ZIP 和 tar.gz 内 JAR 的 `skills/code-review/SKILL.md`，均与源文件字节一致。
+- `git diff --check`：通过。
+
+### 遗留与边界
+
+- 本轮完成指南设计检查、规范校验、加载链路与打包验证，未运行全量回归或调用真实模型评测审查准确率。
+- 当前工作区原有的项目级 `code-review` 示例存在重复拼接且会覆盖新内置版本，已原样归档为 `.sidekick/skills/code-review/SKILL.md.pre-builtin.bak`，并校验 SHA-256 一致；该本地文件被 Git 忽略，不随提交分发。正常的项目级自定义覆盖能力仍保留。
+- 工作区原有 `Main.java` 修改和未跟踪的 `output/` 保留，不纳入本次提交。
+
 ## 2026-10-18 — 内置 debugging Skill
 
 ### 设计审查与调整
