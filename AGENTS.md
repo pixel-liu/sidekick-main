@@ -6,6 +6,12 @@ Read SideKick.md for the shared architecture and development commands.
 
 - 每次迭代项目代码，都必须在 CHANGELOG.md 中记录本次变更、验证结果和遗留问题；完成相关验证后提交本次迭代的代码与文档，并推送到当前 GitHub 仓库的对应分支。
 
+## Built-in skills
+
+- Built-in skills are `web-access` and `debugging`; register new resource files in `SkillBuiltinExtractor`.
+- Keep skill bodies within the current `load_skill` limit of 5,120 Java characters, and keep essential instructions self-contained. Project rules and user authorization take precedence over skill guidance.
+- Validate skill changes with: mvn test "-Dtest=Skill*Test,LoadSkillToolTest" -DskipTests=false
+
 ## Long-term memory
 
 - Preserve project/global visibility boundaries. Deduplicate with (scope, project, SHA-256 of UTF-8 Unicode NFC content).

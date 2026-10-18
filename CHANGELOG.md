@@ -2,6 +2,34 @@
 
 按日期倒序记录项目变更、验证结果和待处理问题。
 
+## 2026-10-18 — 内置 debugging Skill
+
+### 设计审查与调整
+
+- 简单、局部故障采用短流程；仅复杂或不确定问题维护假设与实验，避免强制计划、多个假设和全量检查。
+- 区分诊断授权与修改授权、临时缓解与根因修复、相关测试通过与原始故障已验证，明确证据不足及环境受阻时的交付方式。
+- 核对现有工具边界：`load_skill` 正文上限为 5,120 字符，文件工具限制在项目根目录内。首版将分类排查方法保留在自包含正文中，不依赖读取项目外的参考资料。
+
+### 已完成
+
+- 新增 `src/main/resources/skills/debugging/SKILL.md`，覆盖故障基线、代码定位、假设实验、构建/运行/并发/性能/集成分类排查、必要范围修复、回归验证及完成判断。
+- 在 `SkillBuiltinExtractor` 注册第二个内置 skill；沿用三层覆盖、启停和正文注入机制，未增加工具或命令。
+- 增加真实内置资源的解压、解析、发现、完整注入及一次消费集成检查，并验证已有同版本 `web-access` 缓存旁可正常新增 `debugging`。
+- 同步 README、AGENTS.md 和 SideKick.md，补充使用入口、资源登记约定及验证命令。
+
+### 验证结果
+
+- `mvn test "-Dtest=Skill*Test,LoadSkillToolTest" -DskipTests=false`：49 项通过，0 失败、0 错误、0 跳过。
+- `skill-creator/scripts/quick_validate.py src/main/resources/skills/debugging`：通过；PyYAML 临时依赖安装于被忽略的 `target/skill-validator-deps/`。
+- `mvn package -DskipTests=true`：构建成功；此命令只作打包验证，测试结果来自上面的专项回归。
+- 校验可执行 JAR 及 ZIP、tar.gz 内 JAR 的 `skills/debugging/SKILL.md`，均与源文件字节一致。
+- `git diff --check`：通过。
+
+### 遗留与边界
+
+- 本轮完成指南设计审查、规范校验、加载链路与打包验证，未运行全量回归或调用真实模型进行故障修复效果评测。
+- 工作区原有 `Main.java` 修改和未跟踪的 `output/` 保留，不纳入本次提交。
+
 ## 2026-10-16 — 安装脚本与 GitHub Release 第二版
 
 ### 已完成

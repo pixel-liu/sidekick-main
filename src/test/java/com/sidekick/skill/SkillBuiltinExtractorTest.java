@@ -1,5 +1,6 @@
 package com.sidekick.skill;
 
+import com.sidekick.tool.ToolRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -10,6 +11,60 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.*;
 
 class SkillBuiltinExtractorTest {
+
+    @Test
+    void debuggingIsDiscoverableAndInjectedWithoutTruncation(@TempDir Path tempDir) throws IOException {
+        Path cache = tempDir.resolve("cache");
+        SkillBuiltinExtractor extractor = new SkillBuiltinExtractor(cache);
+        extractor.extractAll();
+
+        String source;
+        try (var in = getClass().getResourceAsStream("/skills/debugging/SKILL.md")) {
+            assertNotNull(in, "debugging 必须随程序打包");
+            source = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+        assertEquals(source, Files.readString(cache.resolve("debugging/SKILL.md")));
+        var parsed = SkillFrontmatterParser.parse(source);
+        assertTrue(parsed.warnings().isEmpty(), parsed.warnings().toString());
+        assertEquals("debugging", parsed.frontmatter().get("name"));
+        assertFalse(parsed.frontmatter().get("description").toString().isBlank());
+        assertFalse(parsed.body().isBlank());
+        assertTrue(parsed.body().length() <= 5 * 1024, "正文必须能被 load_skill 完整注入");
+
+        SkillRegistry registry = new SkillRegistry(cache, null, null,
+                new SkillStateStore(tempDir.resolve("skills.json")));
+        registry.reload();
+        assertTrue(registry.warnings().isEmpty(), registry.warnings().toString());
+        Skill skill = registry.findSkill("debugging");
+        assertNotNull(skill);
+        assertEquals(Skill.Source.BUILTIN, skill.source());
+        assertEquals(parsed.body(), skill.body());
+
+        SkillContextBuffer buffer = new SkillContextBuffer();
+        ToolRegistry tools = new ToolRegistry();
+        tools.setSkillRegistry(registry);
+        tools.setSkillContextBuffer(buffer);
+        String result = tools.executeTool("load_skill", "{\"name\":\"debugging\"}");
+        assertTrue(result.contains("已加载 skill 'debugging'"), result);
+        assertTrue(buffer.drain().contains(skill.body()), "实际注入必须包含完整正文");
+        assertTrue(buffer.isEmpty(), "正文只能消费一次");
+    }
+
+    @Test
+    void addsDebuggingBesideExistingCurrentVersionCache(@TempDir Path tempDir) throws IOException {
+        Path existing = tempDir.resolve("web-access");
+        Files.createDirectories(existing);
+        Files.writeString(existing.resolve(".version"), SkillBuiltinExtractor.CURRENT_VERSION);
+        Files.writeString(existing.resolve("SKILL.md"), "existing cache");
+
+        SkillBuiltinExtractor extractor = new SkillBuiltinExtractor(tempDir);
+        extractor.extractAll();
+
+        assertEquals("existing cache", Files.readString(existing.resolve("SKILL.md")));
+        assertTrue(Files.isRegularFile(tempDir.resolve("debugging/SKILL.md")));
+        assertEquals(SkillBuiltinExtractor.CURRENT_VERSION,
+                Files.readString(tempDir.resolve("debugging/.version")).trim());
+    }
 
     @Test
     void extractsBuiltinSkillFromClasspath(@TempDir Path tempDir) throws IOException {

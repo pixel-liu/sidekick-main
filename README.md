@@ -80,10 +80,20 @@ java -jar target/Sidekick-1.0-SNAPSHOT.jar
 | 记忆 | `/save <事实>`、`/save --global <事实>`、`/memory list/search/delete/clear` |
 | 模型与配置 | `/model <provider>`、`/config provider ...` |
 | MCP 与浏览器 | `/mcp`、`/mcp restart <name>`、`/browser status/connect/disconnect/tabs` |
+| Skill | `/skill list`、`/skill show <name>`、`/skill on/off <name>`、`/skill reload` |
 | 安全与回滚 | `/hitl on/off`、`/policy`、`/audit [N]`、`/snapshot`、`/restore <N>` |
 | 其他 | `/task`、`/wechat`、`/export`、`/init`、`/clear`、`/exit` |
 
 输入 `/help` 或在命令后按补全键可查看完整参数。
+
+## 内置 Skill
+
+- `web-access`：联网搜索、网页读取与浏览器工具选择。
+- `debugging`：排查运行异常、测试或构建失败、卡死、超时、偶发故障与性能退化，按证据定位原因并验证修复。
+
+直接描述问题，例如“定位并修复这个测试失败”，Agent 会根据任务按需调用 `load_skill`。`/skill show debugging` 查看完整排查指南，`/skill off debugging` 可禁用。
+
+内置 skill 随程序解压到 `~/.sidekick/skills-cache/`。可在 `~/.sidekick/skills/<name>/SKILL.md` 或项目 `.sidekick/skills/<name>/SKILL.md` 定制；项目级优先于用户级，用户级优先于内置。不要直接修改缓存目录。
 
 ## 工具与安全边界
 

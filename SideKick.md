@@ -28,6 +28,7 @@ Sidekick 是面向商业使用的 Java Agent CLI 产品，对标 Claude Code；�
 - 项目记忆优先使用 `SideKick.md` / `SideKick.local.md`，兼容 `PAI.md` / `PAI.local.md`；同一位置不要同时维护两套文件。
 - 长期记忆落盘必须使用同目录临时文件和原子替换，避免留下半写 JSON；按 max_entries/token 预算淘汰，只有实际返回或注入模型的召回更新访问统计。
 - Skill 正文只注入一次，引导语围绕用户当前任务，不写死具体任务类型。
+- 内置 skill 为 `web-access` 和 `debugging`；新增资源须登记 `SkillBuiltinExtractor`，正文控制在 `load_skill` 的 5,120 字符限制内。排查指南保持自包含，不依赖项目根目录外的参考文件读取；具体测试命令和交付要求以目标仓库说明为准。
 - 重建代码索引先准备完整数据，再以单个事务替换代码块和关系；失败必须保留旧索引。
 - Runtime API 响应必须通过 JSON 库序列化，耗时 turn 使用有界线程池并在过载时返回明确状态。
 - 命令超时或取消时必须终止完整进程树；文件搜索结果统一使用 `/` 作为展示路径。
