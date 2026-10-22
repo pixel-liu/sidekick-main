@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class SkillBuiltinExtractorTest {
 
     @ParameterizedTest
-    @ValueSource(strings = {"debugging", "code-review"})
+    @ValueSource(strings = {"debugging", "code-review", "skill-authoring"})
     void builtinIsDiscoverableAndInjectedWithoutTruncation(String name, @TempDir Path tempDir) throws IOException {
         Path cache = tempDir.resolve("cache");
         SkillBuiltinExtractor extractor = new SkillBuiltinExtractor(cache);
@@ -54,24 +54,69 @@ class SkillBuiltinExtractorTest {
         assertTrue(buffer.isEmpty(), "正文只能消费一次");
     }
 
-    @Test
-    void addsCodeReviewBesideExistingCurrentVersionCaches(@TempDir Path tempDir) throws IOException {
-        for (String name : new String[]{"web-access", "debugging"}) {
+    @ParameterizedTest
+    @ValueSource(strings = {"code-review", "skill-authoring"})
+    void addsBuiltinBesideExistingCurrentVersionCaches(String addedName, @TempDir Path tempDir) throws IOException {
+        SkillBuiltinExtractor extractor = new SkillBuiltinExtractor(tempDir);
+        var existingNames = extractor.builtinSkillNames().stream().filter(name -> !name.equals(addedName)).toList();
+        for (String name : existingNames) {
             Path existing = tempDir.resolve(name);
             Files.createDirectories(existing);
             Files.writeString(existing.resolve(".version"), SkillBuiltinExtractor.CURRENT_VERSION);
             Files.writeString(existing.resolve("SKILL.md"), "existing cache for " + name);
         }
 
-        SkillBuiltinExtractor extractor = new SkillBuiltinExtractor(tempDir);
         extractor.extractAll();
 
-        for (String name : new String[]{"web-access", "debugging"}) {
+        for (String name : existingNames) {
             assertEquals("existing cache for " + name, Files.readString(tempDir.resolve(name + "/SKILL.md")));
         }
-        assertTrue(Files.isRegularFile(tempDir.resolve("code-review/SKILL.md")));
+        assertTrue(Files.isRegularFile(tempDir.resolve(addedName + "/SKILL.md")));
         assertEquals(SkillBuiltinExtractor.CURRENT_VERSION,
-                Files.readString(tempDir.resolve("code-review/.version")).trim());
+                Files.readString(tempDir.resolve(addedName + "/.version")).trim());
+    }
+
+    @Test
+    void authoringExampleCreatesLoadableProjectSkill(@TempDir Path tempDir) throws IOException {
+        String source;
+        try (var in = getClass().getResourceAsStream("/skills/skill-authoring/SKILL.md")) {
+            assertNotNull(in);
+            source = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+                    .replace("\r\n", "\n");
+        }
+        String fence = "```markdown\n";
+        int start = source.indexOf(fence);
+        assertTrue(start >= 0, "编写指南应提供可执行的文件格式示例");
+        start += fence.length();
+        int end = source.indexOf("\n```", start);
+        assertTrue(end > start);
+        String example = source.substring(start, end) + "\n";
+        var parsed = SkillFrontmatterParser.parse(example);
+        assertTrue(parsed.warnings().isEmpty(), parsed.warnings().toString());
+        assertEquals("release-notes", parsed.frontmatter().get("name"));
+
+        Path project = tempDir.resolve("project");
+        Path skillMd = project.resolve("release-notes/SKILL.md");
+        Files.createDirectories(skillMd.getParent());
+        Files.writeString(skillMd, example);
+        SkillRegistry registry = new SkillRegistry(null, null, project,
+                new SkillStateStore(tempDir.resolve("skills.json")));
+        registry.reload();
+        assertTrue(registry.warnings().isEmpty(), registry.warnings().toString());
+        Skill skill = registry.findSkill("release-notes");
+        assertNotNull(skill);
+        assertEquals(Skill.Source.PROJECT, skill.source());
+        assertEquals("1.0.0", skill.version());
+        assertEquals(java.util.List.of("release", "docs"), skill.tags());
+
+        SkillContextBuffer buffer = new SkillContextBuffer();
+        ToolRegistry tools = new ToolRegistry();
+        tools.setSkillRegistry(registry);
+        tools.setSkillContextBuffer(buffer);
+        String result = tools.executeTool("load_skill", "{\"name\":\"release-notes\"}");
+        assertTrue(result.contains("已加载 skill 'release-notes'"), result);
+        assertEquals(parsed.body(), skill.body());
+        assertTrue(buffer.drain().contains(parsed.body()), "指南中的示例应能作为项目 skill 完整加载");
     }
 
     @Test

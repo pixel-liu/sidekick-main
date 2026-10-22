@@ -8,7 +8,7 @@ Read SideKick.md for the shared architecture and development commands.
 
 ## Built-in skills
 
-- Built-in skills are `web-access`, `debugging`, and `code-review`; register new resource files in `SkillBuiltinExtractor`.
+- Built-in skills are `web-access`, `debugging`, `code-review`, and `skill-authoring`; register new resource files in `SkillBuiltinExtractor`.
 - Keep skill bodies within the current `load_skill` limit of 5,120 Java characters, and keep essential instructions self-contained. Project rules and user authorization take precedence over skill guidance.
 - Validate skill changes with: mvn test "-Dtest=Skill*Test,LoadSkillToolTest" -DskipTests=false
 

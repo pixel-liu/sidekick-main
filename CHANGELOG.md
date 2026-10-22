@@ -2,6 +2,29 @@
 
 按日期倒序记录项目变更、验证结果和待处理问题。
 
+## 2026-10-22 — 内置 skill-authoring Skill
+
+### 已完成
+
+- 新增 `src/main/resources/skills/skill-authoring/SKILL.md`，支持新建 skill、将用户提供的经验或文档提炼为流程，以及改进已有 skill；区分可复用指导、确定性脚本和项目约定，仅讨论设计时不自动创建文件。
+- 覆盖触发范围、命名与位置、同名整体覆盖、用户定制保留、SideKick 支持的 frontmatter、工具及资源可达性、5,120 个 UTF-16 代码单元的正文预算、结构和场景验证，以及接入与交付。
+- 明确项目/用户级 reload 与内置资源构建重启的区别，不将 slash 命令当作 Shell 命令，不假定其他平台的元数据或校验工具在 SideKick 中可用。
+- 提供完整的 `release-notes` 项目级示例，测试会提取该示例，在临时项目中验证解析、可选元数据、发现和完整正文注入；该示例不是额外内置 skill。
+- 在 `SkillBuiltinExtractor` 注册第四个内置 skill；扩展真实资源与同版本缓存共存测试，同步 README、AGENTS.md 和 SideKick.md，未新增工具或命令。
+
+### 验证结果
+
+- `mvn test "-Dtest=Skill*Test,LoadSkillToolTest" -DskipTests=false`：54 项通过，0 失败、0 错误、0 跳过。
+- `skill-creator/scripts/quick_validate.py src/main/resources/skills/skill-authoring`：通过；实际正文完整注入由内置资源集成测试检查。
+- 最后文字校对后执行 `mvn package "-Dtest=SkillBuiltinExtractorTest" -DskipTests=false`：10 项内置资源测试通过，JAR、ZIP、tar.gz 构建成功。
+- 校验可执行 JAR 及 ZIP、tar.gz 内 JAR 的 `skills/skill-authoring/SKILL.md`，均与源文件字节一致。
+- `git diff --check`：通过。
+
+### 遗留与边界
+
+- 本轮完成指南静态审查、规范校验、示例实际加载与打包验证，未运行全量回归或调用真实模型评测 skill 生成及触发效果。
+- 工作区原有 `Main.java` 修改和未跟踪的 `output/` 保留，不纳入本次提交。
+
 ## 2026-10-18 — 内置 code-review Skill
 
 ### 已完成
