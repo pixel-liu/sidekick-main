@@ -1,6 +1,7 @@
 package com.sidekick.cli;
 
 import com.sidekick.llm.LlmClient;
+import com.sidekick.util.AnsiStyle;
 import org.jline.reader.History;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
@@ -58,10 +59,14 @@ class MainInputNormalizationTest {
     void startupBannerUsesOpenLayoutWithoutRightBorder() {
         List<String> lines = Main.startupBannerLines();
 
-        assertTrue(lines.stream().anyMatch(line -> line.contains("Sidekick")));
-        assertTrue(lines.stream().anyMatch(line -> line.contains("π")));
-        assertTrue(lines.stream().anyMatch(line -> line.contains("v16.1.0")));
-        assertTrue(lines.stream().anyMatch(line -> line.contains("Model auto (model)")));
+        assertTrue(lines.get(0).contains("Sidekick v16.1.0"));
+        assertFalse(lines.get(0).contains("π"));
+        assertTrue(lines.get(1).contains("Model auto (model)"));
+        if (AnsiStyle.isEnabled()) {
+            for (String line : lines.subList(0, 4)) {
+                assertTrue(line.matches(".*\u001B\\[97m[^\u001B]+\u001B\\[0m"), line);
+            }
+        }
         assertTrue(lines.stream().anyMatch(line -> line.contains("Tips for getting started")));
         assertTrue(lines.stream().anyMatch(line -> line.contains("@path")));
         assertTrue(lines.stream().noneMatch(line -> line.contains("for shortcuts")));

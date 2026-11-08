@@ -13,6 +13,7 @@ public final class AnsiStyle {
     private static final String YELLOW = "\u001B[33m";
     private static final String RED = "\u001B[31m";
     private static final String GRAY = "\u001B[90m";
+    private static final String BRIGHT_WHITE = "\u001B[97m";
     private static final String PURPLE = "\u001B[38;5;141m";
     private static final String BG_PANEL = "\u001B[48;5;236m";
     private static final boolean ENABLED = determineEnabled();
@@ -34,6 +35,10 @@ public final class AnsiStyle {
 
     public static String subtle(String text) {
         return wrap(DIM + GRAY, text);
+    }
+
+    public static String brightWhite(String text) {
+        return wrap(BRIGHT_WHITE, text);
     }
 
     public static String thinking(String text) {

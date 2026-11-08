@@ -3060,10 +3060,10 @@ public class Main {
         String capabilities = "ReAct · Plan · MCP · Browser · Image · Tools · Memory · RAG";
         String state = mcp + " · " + skills + " · ReAct";
         List<String> lines = new ArrayList<>(List.of(
-                "   " + AnsiStyle.section(" ██████╗  ██╗  ██╗") + "    " + AnsiStyle.emphasis("π  Sidekick") + " " + AnsiStyle.subtle("v" + VERSION),
-                "   " + AnsiStyle.section("██╔════╝  ██║ ██╔╝") + "    " + AnsiStyle.subtle(ready),
-                "   " + AnsiStyle.section("╚█████╗   █████╔╝ ") + "    " + AnsiStyle.subtle(state),
-                "   " + AnsiStyle.section(" ╚═══██╗  ██╔═██╗ ") + "    " + AnsiStyle.subtle(capabilities),
+                "   " + AnsiStyle.section(" ██████╗  ██╗  ██╗") + "    " + AnsiStyle.brightWhite("Sidekick v" + VERSION),
+                "   " + AnsiStyle.section("██╔════╝  ██║ ██╔╝") + "    " + AnsiStyle.brightWhite(ready),
+                "   " + AnsiStyle.section("╚█████╗   █████╔╝ ") + "    " + AnsiStyle.brightWhite(state),
+                "   " + AnsiStyle.section(" ╚═══██╗  ██╔═██╗ ") + "    " + AnsiStyle.brightWhite(capabilities),
                 "   " + AnsiStyle.section("██████╔╝  ██║  ██╗"),
                 "   " + AnsiStyle.section("╚═════╝   ╚═╝  ╚═╝"),
                 "",
