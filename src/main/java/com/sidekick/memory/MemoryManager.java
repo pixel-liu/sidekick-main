@@ -175,6 +175,10 @@ public class MemoryManager {
         return retriever.buildContextForQuery(query, maxTokens, currentProject);
     }
 
+    public MemoryRetriever.RecallContext selectContextForQuery(String query, int maxTokens) {
+        return retriever.selectContextForQuery(query, maxTokens, currentProject);
+    }
+
     /**
      * 记录 token 使用
      */

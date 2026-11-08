@@ -2,12 +2,14 @@ package com.sidekick.plan;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sidekick.context.ContextProfile;
 import com.sidekick.llm.LlmClient;
 import com.sidekick.llm.LlmTraceLogger;
 import com.sidekick.prompt.PromptAssembler;
 import com.sidekick.prompt.PromptContext;
 import com.sidekick.prompt.PromptMode;
 import com.sidekick.prompt.ProjectMemoryLoader;
+import com.sidekick.prompt.RequestPrompt;
 import com.sidekick.util.AnsiStyle;
 import com.sidekick.util.TerminalMarkdownRenderer;
 import org.slf4j.Logger;
@@ -56,12 +58,16 @@ public class Planner {
         }
 
         // 构建规划请求
+        RequestPrompt requestPrompt = promptAssembler.prepare(PromptMode.PLANNER, PromptContext.builder()
+                .projectMemoryContext(buildProjectMemoryContext())
+                .build(), null);
         List<LlmClient.Message> messages = Arrays.asList(
-                LlmClient.Message.system(promptAssembler.assemble(PromptMode.PLANNER, PromptContext.builder()
-                        .projectMemoryContext(buildProjectMemoryContext())
-                        .build())),
+                LlmClient.Message.system(requestPrompt.text()),
                 LlmClient.Message.user("请为以下任务制定执行计划：\n" + goal)
         );
+        if (requestPrompt.trimIfNeeded(messages, null, ContextProfile.from(llmClient))) {
+            out.println("📦 上下文超出输入预算，已精简可选上下文。");
+        }
 
         // 调用LLM生成计划
         PlanningStreamRenderer streamRenderer = new PlanningStreamRenderer(out);

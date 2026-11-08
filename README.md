@@ -8,7 +8,7 @@ SideKick 是一个面向本地开发工作的 Java Agent CLI，提供 ReAct、�
 
 - **任务模式**：默认 ReAct 适合直接执行；`/plan` 将复杂任务拆解后确认执行；`/team` 由规划、执行和审查角色协作。
 - **代码工作流**：文件读写、glob、实时 grep、Shell 命令、代码语义检索与依赖关系查询。
-- **上下文与记忆**：短期上下文自动压缩；`/save` 保存跨会话事实；`SideKick.md` 保存项目规则。
+- **上下文与记忆**：对话历史自动压缩，输入超预算时精简可选上下文；`/save` 保存跨会话事实；`SideKick.md` 保存项目规则。
 - **扩展能力**：内置 Web 搜索与抓取，支持 MCP 工具、资源和 Chrome DevTools 浏览器自动化。
 - **模型与运行时**：可在 GLM、DeepSeek、StepFun、Kimi、FreeLLMAPI、Agnes 间切换；支持后台任务与本地 Runtime API。
 - **安全控制**：路径围栏、命令拦截、人工审批、操作审计和 Side-Git 快照回滚。
@@ -121,6 +121,12 @@ Agent 可使用 `read_file`、`write_file`、`list_dir`、`glob_files`、`grep_c
 | 代码索引 | `~/.sidekick/rag/codebase.db` |
 
 MCP 配置文件不存在时会创建默认 Chrome DevTools 配置。自定义 MCP server 可使用 stdio `command` 或 Streamable HTTP `url`；配置中的 `${PROJECT_DIR}`、`${HOME}` 和环境变量会在启动时展开。
+
+## 上下文压缩与紧急降级
+
+请求发送前先尝试摘要压缩旧对话，再估算消息和工具定义的 token 数，并为回复预留 2,000 token。仍超出输入预算时，按顺序移除 Skills 索引、相关度较低的长期记忆、显式标记为可选的项目记忆段落，回到预算内即停止。保留相关度最高的记忆和 `importance >= 0.8` 的记忆。
+
+可在项目记忆文件中用独立成行的 `<!-- sidekick:optional -->` 和 `<!-- /sidekick:optional -->` 包住可省略的背景说明。多个可选块从后往前移除。未标记的项目规则、已加载的 Skill 正文和核心对话保留。如果可选内容用完后估算仍超限，SideKick 会记录日志，并由模型服务判断能否接受请求。
 
 ## 长期记忆容量与去重
 

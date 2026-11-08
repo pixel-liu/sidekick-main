@@ -11,6 +11,7 @@ import com.sidekick.prompt.PromptAssembler;
 import com.sidekick.prompt.PromptContext;
 import com.sidekick.prompt.PromptMode;
 import com.sidekick.prompt.ProjectMemoryLoader;
+import com.sidekick.prompt.RequestPrompt;
 import com.sidekick.skill.SkillContextBuffer;
 import com.sidekick.skill.SkillIndexFormatter;
 import com.sidekick.skill.SkillRegistry;
@@ -62,7 +63,7 @@ public class SubAgent {
         this.toolRegistry.setCurrentModel(llmClient.getProviderName(), llmClient.getModelName());
         this.conversationHistory = new ArrayList<>();
         this.historyCompactor = new ConversationHistoryCompactor(llmClient);
-        this.conversationHistory.add(LlmClient.Message.system(getSystemPrompt()));
+        this.conversationHistory.add(LlmClient.Message.system(buildRequestPrompt().text()));
     }
 
     public void setExternalContextSupplier(Supplier<String> externalContextSupplier) {
@@ -82,13 +83,13 @@ public class SubAgent {
     /**
      * 根据角色获取系统提示词
      */
-    private String getSystemPrompt() {
-        return promptAssembler.assemble(promptMode(), PromptContext.builder()
+    private RequestPrompt buildRequestPrompt() {
+        return promptAssembler.prepare(promptMode(), PromptContext.builder()
                 .projectMemoryContext(buildProjectMemoryContext())
                 .externalContext(buildExternalContext())
                 .skillIndex(buildSkillIndex())
                 .toolsEnabled(llmClient == null || llmClient.supportsTools())
-                .build());
+                .build(), null);
     }
 
     private PromptMode promptMode() {
@@ -132,10 +133,10 @@ public class SubAgent {
         return drained + "\n" + content;
     }
 
-    private void refreshSystemPrompt() {
-        if (!conversationHistory.isEmpty()) {
-            conversationHistory.set(0, LlmClient.Message.system(getSystemPrompt()));
-        }
+    private RequestPrompt refreshSystemPrompt() {
+        RequestPrompt prompt = buildRequestPrompt();
+        conversationHistory.set(0, LlmClient.Message.system(prompt.text()));
+        return prompt;
     }
 
     private String buildExternalContext() {
@@ -174,7 +175,11 @@ public class SubAgent {
     public AgentMessage execute(AgentMessage task, PrintStream out) {
         log.info("[{}] executing task from {}: type={}", name, task.fromAgent(), task.type());
         pruneHistoricalImagePayloads();
-        refreshSystemPrompt();
+        RequestPrompt requestPrompt = refreshSystemPrompt();
+        ContextProfile contextProfile = toolRegistry.getContextProfile();
+        if (contextProfile == null) {
+            contextProfile = ContextProfile.from(llmClient);
+        }
         String taskContent = prependSkillBodies(task.content());
 
         // 将任务注入对话
@@ -206,9 +211,14 @@ public class SubAgent {
             injectPendingSkillBodies();
 
             try {
+                List<LlmClient.Tool> tools = shouldUseTools() && llmClient.supportsTools()
+                        ? toolRegistry.getToolDefinitions() : null;
+                if (requestPrompt.trimIfNeeded(conversationHistory, tools, contextProfile) && out != null) {
+                    out.println("📦 [" + name + "] 上下文超出输入预算，已精简可选上下文。");
+                }
                 LlmClient.ChatResponse response = llmClient.chat(
                         conversationHistory,
-                        shouldUseTools() && llmClient.supportsTools() ? toolRegistry.getToolDefinitions() : null,
+                        tools,
                         streamRenderer
                 );
                 LlmTraceLogger.logReasoning(log,

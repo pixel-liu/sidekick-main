@@ -93,26 +93,52 @@ public class MemoryRetriever {
     }
 
     public String buildContextForQuery(String query, int maxTokens, String projectKey) {
+        RecallContext recall = selectContextForQuery(query, maxTokens, projectKey);
+        String context = RecallContext.render(recall.entries());
+        recall.recordAccess(recall.entries());
+        return context;
+    }
+
+    public RecallContext selectContextForQuery(String query, int maxTokens, String projectKey) {
         List<MemoryEntry> relevant = selectLongTerm(query, 10, projectKey);
-        if (relevant.isEmpty()) return "";
-
-        StringBuilder context = new StringBuilder();
-        context.append("## 相关长期记忆\n\n");
-
-        List<String> recalledIds = new ArrayList<>();
+        List<MemoryEntry> selected = new ArrayList<>();
         int usedTokens = 0;
         for (MemoryEntry entry : relevant) {
             if (usedTokens + entry.getTokenCount() > maxTokens) break;
-
-            context.append("- [").append(entry.getType()).append("] ")
-                    .append(entry.getContent()).append("\n");
             usedTokens += entry.getTokenCount();
-            recalledIds.add(entry.getId());
+            selected.add(entry);
+        }
+        return new RecallContext(selected, longTermMemory);
+    }
+
+    public static final class RecallContext {
+        private final List<MemoryEntry> entries;
+        private final LongTermMemory store;
+
+        private RecallContext(List<MemoryEntry> entries, LongTermMemory store) {
+            this.entries = List.copyOf(entries);
+            this.store = store;
         }
 
-        longTermMemory.recordAccess(recalledIds);
-        context.append("\n");
-        return context.toString();
+        public List<MemoryEntry> entries() {
+            return entries;
+        }
+
+        public void recordAccess(List<MemoryEntry> included) {
+            if (!included.isEmpty()) {
+                store.recordAccess(included.stream().map(MemoryEntry::getId).toList());
+            }
+        }
+
+        public static String render(List<MemoryEntry> included) {
+            if (included.isEmpty()) return "";
+            StringBuilder context = new StringBuilder("## 相关长期记忆\n\n");
+            for (MemoryEntry entry : included) {
+                context.append("- [").append(entry.getType()).append("] ")
+                        .append(entry.getContent()).append("\n");
+            }
+            return context.append("\n").toString();
+        }
     }
 
     /**

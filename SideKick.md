@@ -6,9 +6,11 @@
 - 常规回归：`mvn test -Pquick`；TUI 相关跑 `mvn test -Pphase16-smoke`。
 - 针对性测试：`mvn test -Dtest=XxxTest -DskipTests=false`。
 
+<!-- sidekick:optional -->
 ## What This Is
 
 Sidekick 是面向商业使用的 Java Agent CLI 产品，对标 Claude Code；当前主路径是 ReAct、Plan-and-Execute、Multi-Agent 三套执行模式。
+<!-- /sidekick:optional -->
 
 ## Architecture
 

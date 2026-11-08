@@ -8,10 +8,12 @@ import com.sidekick.lsp.LspDiagnosticReport;
 import com.sidekick.memory.ConversationHistoryCompactor;
 import com.sidekick.memory.ExplicitMemoryHints;
 import com.sidekick.memory.MemoryManager;
+import com.sidekick.memory.MemoryRetriever.RecallContext;
 import com.sidekick.prompt.PromptAssembler;
 import com.sidekick.prompt.PromptContext;
 import com.sidekick.prompt.PromptMode;
 import com.sidekick.prompt.ProjectMemoryLoader;
+import com.sidekick.prompt.RequestPrompt;
 import com.sidekick.render.PlainRenderer;
 import com.sidekick.render.Renderer;
 import com.sidekick.render.StatusInfo;
@@ -57,6 +59,7 @@ public class Agent {
     private Supplier<Boolean> hitlEnabledSupplier = () -> false;
     private boolean returnFinalResponseWhenStreamed;
     private final PromptAssembler promptAssembler = PromptAssembler.createDefault();
+    private RequestPrompt requestPrompt;
 
     public Agent(LlmClient llmClient) {
         this(llmClient, new ToolRegistry());
@@ -72,7 +75,8 @@ public class Agent {
         this.toolRegistry.setCurrentModel(llmClient.getProviderName(), llmClient.getModelName());
         this.memoryManager.setProjectPath(this.toolRegistry.getProjectPath());
         this.toolRegistry.setScoredMemorySaver(memoryManager::storeFact);
-        conversationHistory.add(LlmClient.Message.system(buildSystemPrompt("")));
+        requestPrompt = buildRequestPrompt(null);
+        conversationHistory.add(LlmClient.Message.system(requestPrompt.text()));
     }
 
     public void setLlmClient(LlmClient llmClient) {
@@ -134,8 +138,8 @@ public class Agent {
 
         // 检索相关长期记忆，注入到 system prompt
         ContextProfile contextProfile = memoryManager.getContextProfile();
-        String memoryContext = memoryManager.buildContextForQuery(userInput, contextProfile.memoryContextTokens());
-        updateSystemPromptWithMemory(memoryContext);
+        requestPrompt = buildRequestPrompt(memoryManager.selectContextForQuery(userInput, contextProfile.memoryContextTokens()));
+        conversationHistory.set(0, LlmClient.Message.system(requestPrompt.text()));
 
         // 添加用户输入到历史（如有 skill body 注入，前置到原文之前）
 //        String userMessageContent = prependSkillBodies(userInput);
@@ -185,9 +189,13 @@ public class Agent {
                 List<LlmClient.Tool> toolDefinitions = llmClient.supportsTools()
                         ? toolRegistry.getToolDefinitions()
                         : null;
+                if (requestPrompt.trimIfNeeded(conversationHistory, toolDefinitions, contextProfile)) {
+                    renderer().stream().println("📦 上下文超出输入预算，已精简可选上下文。");
+                }
                 logRequestContext("react iteration=" + iteration, toolDefinitions);
                 streamRenderer.beginThinking();
                 // 调用 LLM
+                requestPrompt.recordRecalls();
                 LlmClient.ChatResponse response = llmClient.chat(
                         conversationHistory,
                         toolDefinitions,
@@ -273,7 +281,8 @@ public class Agent {
      */
     public void clearHistory() {
         conversationHistory.clear();
-        conversationHistory.add(LlmClient.Message.system(buildSystemPrompt("")));
+        requestPrompt = buildRequestPrompt(null);
+        conversationHistory.add(LlmClient.Message.system(requestPrompt.text()));
 
         // 清空短期记忆
         memoryManager.clearShortTerm();
@@ -289,7 +298,9 @@ public class Agent {
         long beforeTokens = estimateCurrentContextTokens();
         try {
             boolean compacted = historyCompactor.compactNow(conversationHistory);
-            return new CompactionResult(compacted, beforeTokens, estimateCurrentContextTokens(), null);
+            boolean trimmed = requestPrompt.trimIfNeeded(conversationHistory,
+                    llmClient.supportsTools() ? toolRegistry.getToolDefinitions() : null, memoryManager.getContextProfile());
+            return new CompactionResult(compacted || trimmed, beforeTokens, estimateCurrentContextTokens(), null);
         } catch (Exception e) {
             log.warn("manual conversationHistory compaction failed", e);
             return new CompactionResult(false, beforeTokens, estimateCurrentContextTokens(), e.getMessage());
@@ -312,21 +323,13 @@ public class Agent {
         return StatusInfo.active(model, contextWindow, contextTokens, hitl, normalizedPhase);
     }
 
-    /**
-     * 将记忆上下文注入到 system prompt 中（替换 conversationHistory[0]）
-     */
-    private void updateSystemPromptWithMemory(String memoryContext) {
-        conversationHistory.set(0, LlmClient.Message.system(buildSystemPrompt(memoryContext)));
-    }
-
-    private String buildSystemPrompt(String memoryContext) {
-        return promptAssembler.assemble(PromptMode.AGENT, PromptContext.builder()
+    private RequestPrompt buildRequestPrompt(RecallContext recall) {
+        return promptAssembler.prepare(PromptMode.AGENT, PromptContext.builder()
                 .projectMemoryContext(buildProjectMemoryContext())
-                .memoryContext(memoryContext)
                 .externalContext(buildExternalContext())
                 .skillIndex(buildSkillIndex())
                 .toolsEnabled(llmClient == null || llmClient.supportsTools())
-                .build());
+                .build(), recall);
     }
 
     private void maybeCompactHistory() {
@@ -502,12 +505,7 @@ public class Agent {
     }
 
     private int estimateToolsSchemaTokens() {
-        try {
-            return com.sidekick.memory.MemoryEntry.estimateTokens(
-                    new ObjectMapper().writeValueAsString(toolRegistry.getToolDefinitions()));
-        } catch (Exception e) {
-            return 0;
-        }
+        return llmClient.supportsTools() ? RequestPrompt.estimateToolsTokens(toolRegistry.getToolDefinitions()) : 0;
     }
 
     private long estimateCurrentContextTokens() {

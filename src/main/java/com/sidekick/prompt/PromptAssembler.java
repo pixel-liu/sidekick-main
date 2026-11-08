@@ -1,5 +1,7 @@
 package com.sidekick.prompt;
 
+import com.sidekick.memory.MemoryRetriever.RecallContext;
+
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Locale;
@@ -18,6 +20,10 @@ public class PromptAssembler {
     }
 
     public String assemble(PromptMode mode, PromptContext context) {
+        return prepare(mode, context, null).text();
+    }
+
+    public RequestPrompt prepare(PromptMode mode, PromptContext context, RecallContext recall) {
         Objects.requireNonNull(mode, "mode");
         PromptContext ctx = context == null ? PromptContext.empty() : context;
 
@@ -36,15 +42,10 @@ public class PromptAssembler {
         append(prompt, applyVariables(repository.loadRequired(mode.resourcePath()), ctx));
         append(prompt, repository.loadRequired("approvals/" + approvalMode(ctx) + ".md"));
         append(prompt, runtimeContext());
-        append(prompt, dynamicSection("Project Context", ctx.projectMemoryContext(), ctx.memoryContext(),
-                ctx.externalContext()));
-        append(prompt, dynamicSection("Skills", ctx.skillIndex()));
-        append(prompt, repository.loadRequired("context/context-management.md"));
-        append(prompt, repository.loadRequired("handoff.md"));
-
-        String assembled = prompt.toString().trim();
-        validateLanguageSection(assembled, "assembled prompt");
-        return assembled;
+        StringBuilder suffix = new StringBuilder();
+        append(suffix, repository.loadRequired("context/context-management.md"));
+        append(suffix, repository.loadRequired("handoff.md"));
+        return new RequestPrompt(prompt.toString(), suffix.toString(), ctx, recall);
     }
 
     private String approvalMode(PromptContext context) {
@@ -76,7 +77,7 @@ public class PromptAssembler {
         return result;
     }
 
-    private static String dynamicSection(String title, String... values) {
+    static String dynamicSection(String title, String... values) {
         StringBuilder body = new StringBuilder();
         for (String value : values) {
             if (value != null && !value.isBlank()) {
@@ -107,7 +108,7 @@ public class PromptAssembler {
                 """;
     }
 
-    private static void append(StringBuilder sb, String section) {
+    static void append(StringBuilder sb, String section) {
         if (section == null || section.isBlank()) {
             return;
         }

@@ -20,3 +20,8 @@ Read SideKick.md for the shared architecture and development commands.
 - Count only returned recalls or memories actually injected into the model context. Administrative list/scoring scans must not affect recall statistics.
 - Maintain compatibility with legacy JSON; persist via same-directory temporary file and atomic replacement.
 - Validate memory changes with: mvn test "-Dtest=MemoryEntryTest,LongTermMemoryTest,LongTermMemoryRetentionTest,MemoryRetrieverTest,MemoryManagerTest,ToolRegistryTest" -DskipTests=false
+
+## Request context budget
+
+- After history compaction, trim optional prompt context in this order: Skills index, lower-ranked recalls (keep the best match and importance ≥ 0.8), then explicitly marked optional project-memory blocks from last to first. Preserve core messages, tool-call pairs, and unmarked project rules.
+- Use standalone `<!-- sidekick:optional -->` and `<!-- /sidekick:optional -->` lines around disposable project background. Keep rules and required commands outside those blocks. Count recalls only after trimming, from the prompt actually dispatched.

@@ -12,6 +12,7 @@ import com.sidekick.prompt.PromptAssembler;
 import com.sidekick.prompt.PromptContext;
 import com.sidekick.prompt.PromptMode;
 import com.sidekick.prompt.ProjectMemoryLoader;
+import com.sidekick.prompt.RequestPrompt;
 import com.sidekick.runtime.CancellationContext;
 import com.sidekick.skill.SkillContextBuffer;
 import com.sidekick.skill.SkillIndexFormatter;
@@ -442,27 +443,21 @@ public class PlanExecuteAgent {
      */
     private TaskRunResult executeTask(String goal, ExecutionPlan plan, Task task,
                                       StreamState streamState, PrintStream out) throws IOException {
-        String prompt = promptAssembler.assemble(PromptMode.PLAN, PromptContext.builder()
+        var contextProfile = memoryManager.getContextProfile();
+        RequestPrompt requestPrompt = promptAssembler.prepare(PromptMode.PLAN, PromptContext.builder()
                 .projectMemoryContext(buildProjectMemoryContext())
                 .variable("taskType", task.getType())
                 .variable("taskDescription", task.getDescription())
                 .externalContext(buildExternalContext())
                 .skillIndex(buildSkillIndex())
                 .toolsEnabled(llmClient == null || llmClient.supportsTools())
-                .build());
+                .build(), memoryManager.selectContextForQuery(task.getDescription(), contextProfile.memoryContextTokens()));
 
-        // 注入长期记忆上下文
-        String memoryContext = memoryManager.buildContextForQuery(
-                task.getDescription(),
-                memoryManager.getContextProfile().memoryContextTokens());
         String taskInput = buildTaskContext(goal, plan, task);
-        if (!memoryContext.isEmpty()) {
-            taskInput = taskInput + "\n\n" + memoryContext;
-        }
         taskInput = prependSkillBodies(taskInput);
 
         List<LlmClient.Message> messages = new ArrayList<>(Arrays.asList(
-                LlmClient.Message.system(prompt),
+                LlmClient.Message.system(requestPrompt.text()),
                 ImageReferenceParser.userMessage(
                         taskInput,
                         Path.of(toolRegistry.getProjectPath()))
@@ -488,9 +483,14 @@ public class PlanExecuteAgent {
             maybeCompactHistory(messages, out);
             injectPendingSkillBodies(messages);
 
+            List<LlmClient.Tool> tools = llmClient.supportsTools() ? toolRegistry.getToolDefinitions() : null;
+            if (requestPrompt.trimIfNeeded(messages, tools, contextProfile)) {
+                out.println("📦 上下文超出输入预算，已精简可选上下文。");
+            }
+            requestPrompt.recordRecalls();
             LlmClient.ChatResponse response = llmClient.chat(
                     messages,
-                    llmClient.supportsTools() ? toolRegistry.getToolDefinitions() : null,
+                    tools,
                     streamRenderer
             );
             LlmTraceLogger.logReasoning(log,

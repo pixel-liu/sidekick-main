@@ -13,6 +13,7 @@ import java.util.List;
  * 3. 超出预算时触发压缩或裁剪
  */
 public class TokenBudget {
+    public static final int DEFAULT_RESPONSE_RESERVE = 2_000;
     private final int contextWindow;    // 模型上下文窗口大小
     private final int reservedForSystem; // 系统提示预留
     private final int reservedForTools;  // 工具定义预留
@@ -25,7 +26,7 @@ public class TokenBudget {
     private int llmCallCount;
 
     public TokenBudget(int contextWindow) {
-        this(contextWindow, 500, 800, 2000);
+        this(contextWindow, 500, 800, DEFAULT_RESPONSE_RESERVE);
     }
 
     /**
