@@ -29,38 +29,13 @@ public final class BottomStatusBar implements AutoCloseable {
 
     private static final int CONTEXT_BAR_WIDTH = 8;
     private static final Pattern SUMMARY_RATIO = Pattern.compile("(?i)^(?:MCP|Skill)\\s+(\\d+)/(\\d+)$");
-    private static final AttributedStyle BASE_STYLE = style(AttributedStyle.DEFAULT.faint());
-    private static final AttributedStyle MODE_YOLO_STYLE = style(AttributedStyle.DEFAULT
-            .foreground(AttributedStyle.YELLOW)
-            .bold());
-    private static final AttributedStyle MODE_HITL_STYLE = style(AttributedStyle.DEFAULT
-            .foreground(AttributedStyle.GREEN)
-            .bold());
-    private static final AttributedStyle MCP_STYLE = style(AttributedStyle.DEFAULT.foreground(AttributedStyle.CYAN));
-    private static final AttributedStyle SKILL_STYLE = style(AttributedStyle.DEFAULT.foreground(AttributedStyle.MAGENTA));
-    private static final AttributedStyle BRAND_STYLE = style(AttributedStyle.DEFAULT
-            .foreground(AttributedStyle.MAGENTA)
-            .bold());
-    private static final AttributedStyle MODEL_STYLE = style(AttributedStyle.DEFAULT
-            .foreground(AttributedStyle.CYAN)
-            .bold());
-    private static final AttributedStyle PHASE_IDLE_STYLE = style(AttributedStyle.DEFAULT.foreground(AttributedStyle.GREEN));
-    private static final AttributedStyle PHASE_ACTIVE_STYLE = style(AttributedStyle.DEFAULT
-            .foreground(AttributedStyle.YELLOW)
-            .bold());
-    private static final AttributedStyle CTX_LABEL_STYLE = style(AttributedStyle.DEFAULT
-            .foreground(AttributedStyle.BLUE)
-            .bold());
-    private static final AttributedStyle CTX_FILL_STYLE = style(AttributedStyle.DEFAULT
-            .foreground(AttributedStyle.GREEN)
-            .bold());
-    private static final AttributedStyle CTX_EMPTY_STYLE = style(AttributedStyle.DEFAULT
-            .foreground(AttributedStyle.BLUE)
-            .faint());
-    private static final AttributedStyle TOKEN_LABEL_STYLE = style(AttributedStyle.DEFAULT.foreground(AttributedStyle.YELLOW));
-    private static final AttributedStyle CACHE_LABEL_STYLE = style(AttributedStyle.DEFAULT.foreground(AttributedStyle.MAGENTA));
-    private static final AttributedStyle ELAPSED_STYLE = style(AttributedStyle.DEFAULT.foreground(AttributedStyle.YELLOW));
-    private static final AttributedStyle CWD_STYLE = style(AttributedStyle.DEFAULT.faint());
+    private static final AttributedStyle BASE_STYLE = style(AttributedStyle.DEFAULT
+            .foreground(AttributedStyle.BRIGHT | AttributedStyle.WHITE));
+    private static final AttributedStyle EMPHASIS_STYLE = style(BASE_STYLE.bold());
+    private static final AttributedStyle WARNING_STYLE = style(AttributedStyle.DEFAULT
+            .foreground(AttributedStyle.BRIGHT | AttributedStyle.YELLOW).bold());
+    private static final AttributedStyle CRITICAL_STYLE = style(AttributedStyle.DEFAULT
+            .foreground(AttributedStyle.BRIGHT | AttributedStyle.RED).bold());
 
     private final Terminal terminal;
     private final PrintStream out;
@@ -159,46 +134,6 @@ public final class BottomStatusBar implements AutoCloseable {
         }
     }
 
-    static String formatStatusLine(StatusInfo info, int cols) {
-        String mode = info.hitlEnabled() ? "HITL Ctrl+Y for YOLO" : "YOLO Ctrl+Y to enable HITL";
-        String right = environmentSummary(info);
-        if (right.isBlank()) {
-            return fitToColumns(" " + mode, cols);
-        }
-        int gap = Math.max(1, cols - visibleLength(mode) - visibleLength(right) - 2);
-        return fitToColumns(" " + mode + " ".repeat(gap) + right + " ", cols);
-    }
-
-    static String formatFooterLine(StatusInfo info, int cols) {
-        String model = info.model() == null || info.model().isBlank() ? "Auto Model" : info.model().trim();
-        String phase = info.phase() == null || info.phase().isBlank() ? "idle" : info.phase().trim();
-        StringBuilder sb = new StringBuilder(" Auto Model · ");
-        sb.append(model);
-        appendField(sb, phase);
-        appendField(sb, contextSegment(info));
-        if (info.inputTokens() > 0 || info.outputTokens() > 0 || info.cachedInputTokens() > 0) {
-            appendField(sb, "in " + formatTokens(info.inputTokens()) + " out " + formatTokens(info.outputTokens()));
-            if (info.cachedInputTokens() > 0) {
-                sb.append(" cache ").append(formatTokens(info.cachedInputTokens()));
-            }
-            if (info.estimatedCost() != null && !info.estimatedCost().isBlank()) {
-                sb.append(" · ").append(info.estimatedCost().trim());
-            }
-        }
-        if (info.elapsedMillis() > 0) {
-            appendField(sb, formatElapsed(info.elapsedMillis()));
-        }
-        appendField(sb, compactCwd());
-        return fitToColumns(sb.toString(), cols);
-    }
-
-    private static void appendField(StringBuilder sb, String value) {
-        if (value == null || value.isBlank()) {
-            return;
-        }
-        sb.append("  ").append(value.trim());
-    }
-
     private static StatusInfo mergeEnvironment(StatusInfo next, StatusInfo previous) {
         if (next == null || previous == null) {
             return next;
@@ -222,58 +157,41 @@ public final class BottomStatusBar implements AutoCloseable {
         );
     }
 
-    static AttributedString formatStatusLineAttributed(StatusInfo info, int cols) {
+    private static AttributedString formatStatusLineAttributed(StatusInfo info, int cols) {
         String mode = info.hitlEnabled() ? "HITL Ctrl+Y for YOLO" : "YOLO Ctrl+Y to enable HITL";
-        String right = environmentSummary(info);
+        String environment = environmentSummary(info);
         AttributedStringBuilder builder = new AttributedStringBuilder(Math.max(0, cols));
-        builder.append(" ", BASE_STYLE);
-        builder.append(mode, info.hitlEnabled() ? MODE_HITL_STYLE : MODE_YOLO_STYLE);
-        if (!right.isBlank()) {
-            int gap = Math.max(1, cols - visibleLength(mode) - visibleLength(right) - 2);
-            builder.append(" ".repeat(gap), BASE_STYLE);
-            appendEnvironmentSummaryStyled(builder, info);
-            builder.append(" ", BASE_STYLE);
+        builder.append(mode, info.hitlEnabled() ? EMPHASIS_STYLE : WARNING_STYLE);
+        if (!environment.isBlank()) {
+            builder.append(" · " + environment, BASE_STYLE);
         }
         return fitToColumns(builder.toAttributedString(), cols);
     }
 
-    static AttributedString formatFooterLineAttributed(StatusInfo info, int cols) {
+    private static AttributedString formatFooterLineAttributed(StatusInfo info, int cols) {
         String model = info.model() == null || info.model().isBlank() ? "Auto Model" : info.model().trim();
         String phase = info.phase() == null || info.phase().isBlank() ? "idle" : info.phase().trim();
         AttributedStringBuilder builder = new AttributedStringBuilder(Math.max(0, cols));
-        builder.append(" ", BASE_STYLE);
-        builder.append("Auto Model", BRAND_STYLE);
-        builder.append(" · ", BASE_STYLE);
-        builder.append(model, MODEL_STYLE);
-        appendStyledField(builder, phase, "idle".equalsIgnoreCase(phase) ? PHASE_IDLE_STYLE : PHASE_ACTIVE_STYLE);
+        builder.append("Auto Model · ", BASE_STYLE);
+        builder.append(model, EMPHASIS_STYLE);
+        appendStyledField(builder, phase, "idle".equalsIgnoreCase(phase) ? BASE_STYLE : WARNING_STYLE);
         appendContextField(builder, info);
         if (info.inputTokens() > 0 || info.outputTokens() > 0 || info.cachedInputTokens() > 0) {
             appendUsageField(builder, info);
             if (info.estimatedCost() != null && !info.estimatedCost().isBlank()) {
                 builder.append(" · ", BASE_STYLE);
-                builder.append(info.estimatedCost().trim(), TOKEN_LABEL_STYLE);
+                builder.append(info.estimatedCost().trim(), BASE_STYLE);
             }
         }
         if (info.elapsedMillis() > 0) {
-            appendStyledField(builder, formatElapsed(info.elapsedMillis()), ELAPSED_STYLE);
+            appendStyledField(builder, formatElapsed(info.elapsedMillis()), BASE_STYLE);
         }
-        appendStyledField(builder, compactCwd(), CWD_STYLE);
+        appendStyledField(builder, compactCwd(), BASE_STYLE);
         return fitToColumns(builder.toAttributedString(), cols);
     }
 
     static int inputDockRow(int terminalRows, int dockRows) {
         return Math.max(0, terminalRows - Math.max(0, dockRows) - 1);
-    }
-
-    private static String fitToColumns(String text, int cols) {
-        if (cols <= 0) {
-            return "";
-        }
-        String safe = text == null ? "" : text;
-        if (safe.length() > cols) {
-            return safe.substring(0, cols);
-        }
-        return safe + " ".repeat(cols - safe.length());
     }
 
     private static String environmentSummary(StatusInfo info) {
@@ -305,20 +223,6 @@ public final class BottomStatusBar implements AutoCloseable {
         return active + "/" + total + " " + plural;
     }
 
-    private static void appendEnvironmentSummaryStyled(AttributedStringBuilder builder, StatusInfo info) {
-        String mcp = formatEnvironment(info.mcpSummary(), "MCP server", "MCP servers");
-        String skill = formatEnvironment(info.skillSummary(), "skill", "skills");
-        if (!mcp.isBlank()) {
-            builder.append(mcp, MCP_STYLE);
-        }
-        if (!mcp.isBlank() && !skill.isBlank()) {
-            builder.append(" · ", BASE_STYLE);
-        }
-        if (!skill.isBlank()) {
-            builder.append(skill, SKILL_STYLE);
-        }
-    }
-
     private static void appendStyledField(AttributedStringBuilder builder, String value, AttributedStyle style) {
         if (value == null || value.isBlank()) {
             return;
@@ -329,41 +233,28 @@ public final class BottomStatusBar implements AutoCloseable {
 
     private static void appendContextField(AttributedStringBuilder builder, StatusInfo info) {
         ContextGauge gauge = contextGauge(info);
-        builder.append("  ", BASE_STYLE);
-        builder.append("ctx", CTX_LABEL_STYLE);
-        builder.append(" ", BASE_STYLE);
-        if (gauge.filled() > 0) {
-            builder.append("█".repeat(gauge.filled()), CTX_FILL_STYLE);
-        }
-        if (gauge.empty() > 0) {
-            builder.append("░".repeat(gauge.empty()), CTX_EMPTY_STYLE);
-        }
+        builder.append("  ctx " + "█".repeat(gauge.filled()) + "░".repeat(gauge.empty()), BASE_STYLE);
         builder.append(" ", BASE_STYLE);
         builder.append(gauge.percent() + "%", contextPercentStyle(gauge.percent()));
         builder.append(" (" + formatTokens(gauge.total()) + "/" + formatTokens(gauge.window()) + ")", BASE_STYLE);
     }
 
     private static void appendUsageField(AttributedStringBuilder builder, StatusInfo info) {
-        builder.append("  ", BASE_STYLE);
-        builder.append("in", TOKEN_LABEL_STYLE);
-        builder.append(" " + formatTokens(info.inputTokens()) + " ", BASE_STYLE);
-        builder.append("out", TOKEN_LABEL_STYLE);
-        builder.append(" " + formatTokens(info.outputTokens()), BASE_STYLE);
+        builder.append("  in " + formatTokens(info.inputTokens()) + " out " + formatTokens(info.outputTokens()),
+                BASE_STYLE);
         if (info.cachedInputTokens() > 0) {
-            builder.append(" ", BASE_STYLE);
-            builder.append("cache", CACHE_LABEL_STYLE);
-            builder.append(" " + formatTokens(info.cachedInputTokens()), BASE_STYLE);
+            builder.append(" cache " + formatTokens(info.cachedInputTokens()), BASE_STYLE);
         }
     }
 
     private static AttributedStyle contextPercentStyle(int percent) {
         if (percent >= 90) {
-            return style(AttributedStyle.DEFAULT.foreground(AttributedStyle.RED).bold());
+            return CRITICAL_STYLE;
         }
         if (percent >= 70) {
-            return style(AttributedStyle.DEFAULT.foreground(AttributedStyle.YELLOW).bold());
+            return WARNING_STYLE;
         }
-        return style(AttributedStyle.DEFAULT.foreground(AttributedStyle.GREEN).bold());
+        return EMPHASIS_STYLE;
     }
 
     private static AttributedStyle style(AttributedStyle style) {
@@ -386,14 +277,6 @@ public final class BottomStatusBar implements AutoCloseable {
         builder.append(safe);
         builder.append(" ".repeat(cols - length), BASE_STYLE);
         return builder.toAttributedString();
-    }
-
-    private static String contextSegment(StatusInfo info) {
-        ContextGauge gauge = contextGauge(info);
-        String bar = "█".repeat(Math.max(0, gauge.filled()))
-                + "░".repeat(Math.max(0, gauge.empty()));
-        return "ctx " + bar + " " + gauge.percent() + "% ("
-                + formatTokens(gauge.total()) + "/" + formatTokens(gauge.window()) + ")";
     }
 
     private static ContextGauge contextGauge(StatusInfo info) {
@@ -420,10 +303,6 @@ public final class BottomStatusBar implements AutoCloseable {
             normalized = "~" + normalized.substring(home.length());
         }
         return normalized;
-    }
-
-    private static int visibleLength(String text) {
-        return text == null ? 0 : text.length();
     }
 
     private static String formatTokens(long t) {

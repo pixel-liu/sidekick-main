@@ -4,6 +4,7 @@ import com.sidekick.render.StatusInfo;
 import com.sidekick.util.AnsiStyle;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
+import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStyle;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -12,18 +13,17 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BottomStatusBarTest {
 
     @Test
-    void formatStatusLineIncludesAllFields() {
+    void footerLineIncludesAllFields() {
         StatusInfo info = StatusInfo.tokens("glm-5.1", 200_000L, 1200L, 1000L, 234L, 100L, "¥0.0123",
                 true, 1500L, "running");
-        String line = BottomStatusBar.formatFooterLine(info, 200);
+        String line = footerLine(info, 200);
         assertTrue(line.contains("Auto Model"), line);
         assertTrue(line.contains("running"), line);
         assertTrue(line.contains("glm-5.1"), line);
@@ -40,7 +40,7 @@ class BottomStatusBarTest {
     void contextSegmentUsesContextTokensNotUsageTotals() {
         StatusInfo info = StatusInfo.tokens("glm-5.1", 200_000L, 1200L, 51_000L, 2_000L, 0L,
                 null, false, 0L, "idle");
-        String line = BottomStatusBar.formatFooterLine(info, 200);
+        String line = footerLine(info, 200);
 
         assertTrue(line.contains("ctx"), line);
         assertTrue(line.contains("1.2k/200.0k"), line);
@@ -51,82 +51,66 @@ class BottomStatusBarTest {
     @Test
     void formatStatusLinePadsToColumnWidth() {
         StatusInfo info = new StatusInfo("glm-5.1", 0L, 200_000L, false, 0L);
-        String line = BottomStatusBar.formatStatusLine(info, 80);
-        assertTrue(visible(line).length() == 80, "status line should fill the bar: " + visible(line).length());
+        AttributedString line = BottomStatusBar.formatStatusLines(info, 80).get(0);
+        assertEquals(80, line.columnLength());
     }
 
     @Test
     void formatStatusLineTruncatesWhenLong() {
-        StatusInfo info = new StatusInfo("very-long-model-name-exceeding-cols",
-                999_999L, 200_000L, true, 0L);
-        String line = BottomStatusBar.formatStatusLine(info, 30);
-        assertTrue(visible(line).length() == 30);
+        StatusInfo info = StatusInfo.idle("glm-5.1", 200_000L, false)
+                .withEnvironment("MCP 4/4", "Skill 2/2");
+        AttributedString line = BottomStatusBar.formatStatusLines(info, 30).get(0);
+        assertEquals(30, line.columnLength());
+        assertTrue(line.toString().startsWith("YOLO Ctrl+Y to enable HITL"));
     }
 
     @Test
-    void formatStatusLineHidesElapsedWhenZero() {
+    void footerLineHidesElapsedWhenZero() {
         StatusInfo info = new StatusInfo("glm-5.1", 0L, 200_000L, false, 0L);
-        String line = BottomStatusBar.formatFooterLine(info, 80);
+        String line = footerLine(info, 80);
         assertFalse(line.contains("ms"));
         assertFalse(line.contains("0s"));
     }
 
     @Test
-    void formatStatusLineHandlesMillisecondElapsed() {
+    void footerLineHandlesMillisecondElapsed() {
         StatusInfo info = new StatusInfo("glm-5.1", 0L, 0L, false, 250L);
-        String line = BottomStatusBar.formatFooterLine(info, 80);
+        String line = footerLine(info, 80);
         assertTrue(line.contains("250ms"), line);
     }
 
     @Test
     void footerLineFitsColumnWidth() {
-        String line = BottomStatusBar.formatFooterLine(StatusInfo.idle("glm-5.1", 200_000L, false), 40);
-        assertTrue(line.length() == 40, "footer should fill requested width: " + line.length());
-        assertTrue(line.contains("Auto Model"), line);
+        AttributedString line = BottomStatusBar.formatStatusLines(StatusInfo.idle("测试模型", 200_000L, false), 40).get(1);
+        assertEquals(40, line.columnLength());
+        assertTrue(line.toString().startsWith("Auto Model · 测试模型"), line.toString());
     }
 
     @Test
     void activeStatusLineShowsPhase() {
         StatusInfo info = StatusInfo.active("glm-5.1", 200_000L, false, "plan")
                 .withEnvironment("MCP 4/4", "Skill 2/2");
-        String top = BottomStatusBar.formatStatusLine(info, 80);
-        String bottom = BottomStatusBar.formatFooterLine(info, 80);
-        assertTrue(top.contains("4 MCP servers"), top);
-        assertTrue(top.contains("2 skills"), top);
-        assertTrue(bottom.contains("plan"), bottom);
-        assertTrue(bottom.contains("glm-5.1"), bottom);
+        String top = BottomStatusBar.formatStatusLines(info, 80).get(0).toString();
+        String bottom = footerLine(info, 80);
+        assertEquals("YOLO Ctrl+Y to enable HITL · 4 MCP servers · 2 skills", top.stripTrailing());
+        assertTrue(bottom.startsWith("Auto Model · glm-5.1  plan"), bottom);
     }
 
     @Test
-    void statusLinesUseJLineAttributes() {
-        StatusInfo info = new StatusInfo("glm-5.1", 0L, 200_000L, false, 0L);
-        var lines = BottomStatusBar.formatStatusLines(info, 80);
-        assertEquals(2, lines.size());
-        assertTrue(lines.get(0).toString().contains("YOLO"), "status row should show current mode");
-        if (AnsiStyle.isEnabled()) {
-            assertTrue(lines.get(1).toAnsi().contains("[2m"), "footer row should use subtle style");
-        } else {
-            assertFalse(lines.get(1).toAnsi().contains("\u001B["), "NO_COLOR should keep footer plain");
-        }
-    }
-
-    @Test
-    void statusLinesHighlightKeySegments() {
+    void statusLinesUseBrightColorsForTextAndWarnings() {
         StatusInfo info = StatusInfo.tokens("deepseek-v4-pro", 1_000_000L, 5200L, 16_100L,
                         437L, 14_300L, null, false, 0L, "idle")
                 .withEnvironment("MCP 5/5", "Skill 5/5");
         var lines = BottomStatusBar.formatStatusLines(info, 140);
-        String top = lines.get(0).toString();
-        String footer = lines.get(1).toString();
-
-        assertStyledWhenColorEnabled(lines.get(0), top, "YOLO");
-        assertStyledWhenColorEnabled(lines.get(0), top, "5 MCP servers");
-        assertStyledWhenColorEnabled(lines.get(0), top, "5 skills");
-        assertStyledWhenColorEnabled(lines.get(1), footer, "deepseek-v4-pro");
-        assertStyledWhenColorEnabled(lines.get(1), footer, "idle");
-        assertStyledWhenColorEnabled(lines.get(1), footer, "ctx");
-        assertStyledWhenColorEnabled(lines.get(1), footer, "in");
-        assertStyledWhenColorEnabled(lines.get(1), footer, "cache");
+        assertEquals(2, lines.size());
+        AttributedStyle white = AttributedStyle.DEFAULT.foreground(AttributedStyle.BRIGHT | AttributedStyle.WHITE);
+        AttributedStyle yellow = AttributedStyle.DEFAULT.foreground(AttributedStyle.BRIGHT | AttributedStyle.YELLOW);
+        assertSegmentStyle(lines.get(0), "YOLO", yellow.bold());
+        assertSegmentStyle(lines.get(0), "5 MCP servers · 5 skills", white);
+        assertSegmentStyle(lines.get(1), "Auto Model · ", white);
+        assertSegmentStyle(lines.get(1), "deepseek-v4-pro", white.bold());
+        assertSegmentStyle(lines.get(1), "idle  ctx ░░░░░░░░", white);
+        assertSegmentStyle(lines.get(1), "(5.2k/1.0M)  in 16.1k out 437 cache 14.3k", white);
     }
 
     @Test
@@ -215,17 +199,16 @@ class BottomStatusBarTest {
         }
     }
 
-    private static String visible(String line) {
-        return line;
+    private static String footerLine(StatusInfo info, int columns) {
+        return BottomStatusBar.formatStatusLines(info, columns).get(1).toString();
     }
 
-    private static void assertStyledWhenColorEnabled(org.jline.utils.AttributedString line, String plain, String segment) {
-        int index = plain.indexOf(segment);
-        assertTrue(index >= 0, "missing segment: " + segment + " in " + plain);
-        if (AnsiStyle.isEnabled()) {
-            assertNotEquals(AttributedStyle.DEFAULT, line.styleAt(index), segment + " should be styled");
-        } else {
-            assertEquals(AttributedStyle.DEFAULT, line.styleAt(index), segment + " should stay plain under NO_COLOR");
+    private static void assertSegmentStyle(AttributedString line, String segment, AttributedStyle colorStyle) {
+        int start = line.toString().indexOf(segment);
+        assertTrue(start >= 0, "missing segment: " + segment + " in " + line);
+        AttributedStyle expected = AnsiStyle.isEnabled() ? colorStyle : AttributedStyle.DEFAULT;
+        for (int index = start; index < start + segment.length(); index++) {
+            assertEquals(expected, line.styleAt(index), segment);
         }
     }
 }
