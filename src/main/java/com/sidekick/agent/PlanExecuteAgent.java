@@ -107,7 +107,6 @@ public class PlanExecuteAgent {
     private final Planner planner;
     private final PlanReviewHandler reviewHandler;
     private final MemoryManager memoryManager;
-    private final ConversationHistoryCompactor historyCompactor;
     private final PrintStream out;
     private Supplier<String> externalContextSupplier = () -> "";
     private SkillRegistry skillRegistry;
@@ -146,7 +145,6 @@ public class PlanExecuteAgent {
         this.planner = planner != null ? planner : new Planner(llmClient, this.out);
         this.reviewHandler = reviewHandler == null ? (goal, plan) -> PlanReviewDecision.execute() : reviewHandler;
         this.memoryManager = memoryManager != null ? memoryManager : new MemoryManager(llmClient);
-        this.historyCompactor = new ConversationHistoryCompactor(llmClient);
         this.toolRegistry.setContextProfile(this.memoryManager.getContextProfile());
         this.toolRegistry.setCurrentModel(llmClient.getProviderName(), llmClient.getModelName());
         this.memoryManager.setProjectPath(this.toolRegistry.getProjectPath());
@@ -185,8 +183,8 @@ public class PlanExecuteAgent {
         this.skillContextBuffer = skillContextBuffer;
     }
 
-    private void maybeCompactHistory(List<LlmClient.Message> messages, PrintStream out) {
-        if (historyCompactor == null) return;
+    private void maybeCompactHistory(ConversationHistoryCompactor historyCompactor,
+                                     List<LlmClient.Message> messages, PrintStream out) {
         int trigger = memoryManager.getContextProfile().compressionTriggerTokens();
         try {
             boolean compacted = historyCompactor.compactIfNeeded(messages, trigger);
@@ -456,12 +454,11 @@ public class PlanExecuteAgent {
         String taskInput = buildTaskContext(goal, plan, task);
         taskInput = prependSkillBodies(taskInput);
 
-        List<LlmClient.Message> messages = new ArrayList<>(Arrays.asList(
-                LlmClient.Message.system(requestPrompt.text()),
-                ImageReferenceParser.userMessage(
-                        taskInput,
-                        Path.of(toolRegistry.getProjectPath()))
-        ));
+        ConversationHistoryCompactor historyCompactor = new ConversationHistoryCompactor(llmClient);
+        List<LlmClient.Message> messages = new ArrayList<>();
+        messages.add(LlmClient.Message.system(requestPrompt.text()));
+        historyCompactor.startTurn(messages, ImageReferenceParser.userMessage(
+                taskInput, Path.of(toolRegistry.getProjectPath())));
 
         StringBuilder allResults = new StringBuilder();
         int iteration = 0;
@@ -480,16 +477,17 @@ public class PlanExecuteAgent {
 
             // 调 LLM 前评估 messages 是否接近 window 上限；超阈值压缩早期消息为摘要。
             injectPendingLspDiagnostics(messages, out);
-            maybeCompactHistory(messages, out);
+            maybeCompactHistory(historyCompactor, messages, out);
             injectPendingSkillBodies(messages);
 
             List<LlmClient.Tool> tools = llmClient.supportsTools() ? toolRegistry.getToolDefinitions() : null;
-            if (requestPrompt.trimIfNeeded(messages, tools, contextProfile)) {
+            var prepared = requestPrompt.prepareMessages(messages, historyCompactor, tools, contextProfile);
+            if (prepared.trimmed()) {
                 out.println("📦 上下文超出输入预算，已精简可选上下文。");
             }
             requestPrompt.recordRecalls();
             LlmClient.ChatResponse response = llmClient.chat(
-                    messages,
+                    prepared.messages(),
                     tools,
                     streamRenderer
             );
@@ -544,6 +542,7 @@ public class PlanExecuteAgent {
 
             List<ToolExecutionResult> toolResults = executeToolCalls(task.getId(), response.toolCalls());
             for (ToolExecutionResult toolResult : toolResults) {
+                historyCompactor.recordToolResult(toolResult);
                 memoryManager.addToolResult(toolResult.name(), toolResult.result());
                 allResults.append(toolResult.result()).append("\n");
                 messages.add(LlmClient.Message.tool(toolResult.id(), toolResult.result()));

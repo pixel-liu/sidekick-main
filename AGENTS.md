@@ -23,5 +23,8 @@ Read SideKick.md for the shared architecture and development commands.
 
 ## Request context budget
 
+- Count turns from actual user or task entry points. Automatic history compaction normally preserves three turns. Two consecutive failed or timed-out calls to the same tool with equivalent JSON arguments temporarily preserve five. Return to three after two subsequently completed turns without a new trigger.
+- Cache up to two compacted turns per conversation. Restore only the needed turns in the outbound request, annotate their overlap with the summary, and drop the archive when clearing history. Keep the historical image policy and complete tool-call pairs.
 - After history compaction, trim optional prompt context in this order: Skills index, lower-ranked recalls (keep the best match and importance ≥ 0.8), then explicitly marked optional project-memory blocks from last to first. Preserve core messages, tool-call pairs, and unmarked project rules.
+- If the expanded history still exceeds the input budget, omit restored turns and compact to three if needed. If the core still exceeds the budget after that fallback, report the error before dispatch.
 - Use standalone `<!-- sidekick:optional -->` and `<!-- /sidekick:optional -->` lines around disposable project background. Keep rules and required commands outside those blocks. Count recalls only after trimming, from the prompt actually dispatched.

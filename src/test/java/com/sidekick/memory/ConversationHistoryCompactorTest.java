@@ -1,6 +1,7 @@
 package com.sidekick.memory;
 
 import com.sidekick.llm.LlmClient;
+import com.sidekick.tool.ToolRegistry.ToolExecutionResult;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -11,6 +12,63 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ConversationHistoryCompactorTest {
+
+    @Test
+    void recoveryUsesFiveRealTurnsAndEndsAfterTwoCleanCompletions() {
+        StubCompactor c = new StubCompactor("SUMMARY", 3);
+        List<LlmClient.Message> history = new ArrayList<>(List.of(LlmClient.Message.system("S")));
+        for (int turn = 1; turn <= 6; turn++) {
+            c.startTurn(history, LlmClient.Message.user("Q" + turn));
+            history.add(LlmClient.Message.user("injected diagnostics " + turn));
+            history.add(LlmClient.Message.assistant("A" + turn));
+        }
+        assertTrue(c.compactIfNeeded(history, 0));
+        assertEquals(List.of("Q4", "Q5", "Q6"), userTurns(history));
+
+        c.startTurn(history, LlmClient.Message.user("Q7"));
+        c.recordToolResult(result("a", true, "timed out"));
+        c.recordToolResult(result("b", false, "读取文件失败: missing"));
+        assertFalse(c.isRecovering(), "different arguments break the streak");
+        c.recordToolResult(result("b", false, "ok"));
+        c.recordToolResult(result("b", true, "timed out"));
+        assertFalse(c.isRecovering(), "success breaks the streak");
+        c.recordToolResult(result("b", false, "读取文件失败: missing"));
+        assertTrue(c.isRecovering());
+
+        List<LlmClient.Message> recovery = c.withRecoveryHistory(history);
+        assertEquals(List.of("Q3", "Q4", "Q5", "Q6", "Q7"), userTurns(recovery));
+        assertTrue(recovery.contains(LlmClient.Message.user("injected diagnostics 3")));
+        assertEquals(List.of("Q4", "Q5", "Q6", "Q7"), userTurns(history));
+        assertFalse(c.compactIfNeeded(history, 0), "recovery protects the real turns, including diagnostics");
+
+        c.completeTurn();
+        for (int turn = 8; turn <= 9; turn++) {
+            c.startTurn(history, LlmClient.Message.user("Q" + turn));
+            assertTrue(c.isRecovering());
+            c.compactIfNeeded(history, 0);
+            assertEquals(5, userTurns(c.withRecoveryHistory(history)).size());
+            c.completeTurn();
+        }
+        assertFalse(c.isRecovering());
+        assertTrue(c.compactIfNeeded(history, 0));
+        assertEquals(List.of("Q7", "Q8", "Q9"), userTurns(c.withRecoveryHistory(history)));
+        c.clear();
+        history.clear();
+        c.startTurn(history, LlmClient.Message.user("Q10"));
+        c.recordToolResult(result("b", true, "timed out"));
+        assertFalse(c.isRecovering(), "clearing history must drop the previous failure and archive");
+        assertEquals(List.of("Q10"), userTurns(c.withRecoveryHistory(history)));
+    }
+
+    private static ToolExecutionResult result(String path, boolean timedOut, String output) {
+        return new ToolExecutionResult("id", "read_file", "{\"path\":\"" + path + "\"}",
+                output, 0, timedOut, List.of());
+    }
+
+    private static List<String> userTurns(List<LlmClient.Message> messages) {
+        return messages.stream().filter(message -> "user".equals(message.role()) && message.content().startsWith("Q"))
+                .map(LlmClient.Message::content).toList();
+    }
 
     @Test
     void doesNothingWhenBelowTrigger() {

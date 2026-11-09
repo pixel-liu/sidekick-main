@@ -143,7 +143,7 @@ public class Agent {
 
         // 添加用户输入到历史（如有 skill body 注入，前置到原文之前）
 //        String userMessageContent = prependSkillBodies(userInput);
-        conversationHistory.add(ImageReferenceParser.userMessage(
+        historyCompactor.startTurn(conversationHistory, ImageReferenceParser.userMessage(
                 userInput,
                 Path.of(toolRegistry.getProjectPath())));
         StringBuilder reasoningTranscript = new StringBuilder();
@@ -189,15 +189,17 @@ public class Agent {
                 List<LlmClient.Tool> toolDefinitions = llmClient.supportsTools()
                         ? toolRegistry.getToolDefinitions()
                         : null;
-                if (requestPrompt.trimIfNeeded(conversationHistory, toolDefinitions, contextProfile)) {
+                var prepared = requestPrompt.prepareMessages(conversationHistory, historyCompactor,
+                        toolDefinitions, contextProfile);
+                if (prepared.trimmed()) {
                     renderer().stream().println("📦 上下文超出输入预算，已精简可选上下文。");
                 }
-                logRequestContext("react iteration=" + iteration, toolDefinitions);
+                logRequestContext("react iteration=" + iteration, prepared.messages(), toolDefinitions);
                 streamRenderer.beginThinking();
                 // 调用 LLM
                 requestPrompt.recordRecalls();
                 LlmClient.ChatResponse response = llmClient.chat(
-                        conversationHistory,
+                        prepared.messages(),
                         toolDefinitions,
                         streamRenderer
                 );
@@ -232,6 +234,7 @@ public class Agent {
 
                     List<ToolExecutionResult> toolResults = executeToolCalls(response.toolCalls(), iteration);
                     for (ToolExecutionResult toolResult : toolResults) {
+                        historyCompactor.recordToolResult(toolResult);
                         memoryManager.addToolResult(toolResult.name(), toolResult.result());
                         conversationHistory.add(LlmClient.Message.tool(toolResult.id(), toolResult.result()));
                     }
@@ -245,6 +248,7 @@ public class Agent {
                 // 没有工具调用，直接返回结果
                 appendReasoning(reasoningTranscript, response.reasoningContent());
                 conversationHistory.add(LlmClient.Message.assistant(response.content()));
+                historyCompactor.completeTurn();
 
                 // 存入记忆
                 memoryManager.addAssistantMessage(response.content());
@@ -281,6 +285,7 @@ public class Agent {
      */
     public void clearHistory() {
         conversationHistory.clear();
+        historyCompactor.clear();
         requestPrompt = buildRequestPrompt(null);
         conversationHistory.add(LlmClient.Message.system(requestPrompt.text()));
 
@@ -509,11 +514,12 @@ public class Agent {
     }
 
     private long estimateCurrentContextTokens() {
-        long messageTokens = com.sidekick.memory.TokenBudget.estimateMessagesTokens(conversationHistory);
+        long messageTokens = com.sidekick.memory.TokenBudget.estimateMessagesTokens(
+                historyCompactor.withRecoveryHistory(conversationHistory));
         return Math.max(0L, messageTokens + estimateToolsSchemaTokens());
     }
 
-    private void logRequestContext(String scope, List<LlmClient.Tool> tools) {
+    private void logRequestContext(String scope, List<LlmClient.Message> requestMessages, List<LlmClient.Tool> tools) {
         if (!log.isInfoEnabled()) {
             return;
         }
@@ -524,8 +530,8 @@ public class Agent {
         int imageParts = 0;
         int messages = 0;
         StringBuilder imageDetails = new StringBuilder();
-        for (int messageIndex = 0; messageIndex < conversationHistory.size(); messageIndex++) {
-            LlmClient.Message msg = conversationHistory.get(messageIndex);
+        for (int messageIndex = 0; messageIndex < requestMessages.size(); messageIndex++) {
+            LlmClient.Message msg = requestMessages.get(messageIndex);
             messages++;
             int tokens = com.sidekick.memory.TokenBudget.estimateMessagesTokens(List.of(msg));
             imageParts += msg.imagePartCount();

@@ -2,14 +2,17 @@ package com.sidekick.prompt;
 
 import com.sidekick.context.ContextProfile;
 import com.sidekick.llm.LlmClient;
+import com.sidekick.memory.ConversationHistoryCompactor;
 import com.sidekick.memory.ConversationMemory;
 import com.sidekick.memory.LongTermMemory;
 import com.sidekick.memory.MemoryEntry;
 import com.sidekick.memory.MemoryRetriever;
 import com.sidekick.memory.TokenBudget;
+import com.sidekick.tool.ToolRegistry.ToolExecutionResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -24,6 +27,42 @@ class RequestPromptTest {
     private final PromptAssembler assembler = PromptAssembler.createDefault();
 
     @TempDir Path tempDir;
+
+    @Test
+    void overBudgetRecoveryFallsBackWithoutMutatingCoreHistory() throws IOException {
+        RequestPrompt prompt = assembler.prepare(PromptMode.AGENT, context(), null);
+        ConversationHistoryCompactor compactor = new ConversationHistoryCompactor(null) {
+            @Override
+            protected String summarize(List<LlmClient.Message> messages) {
+                return "summary";
+            }
+        };
+        List<LlmClient.Message> history = new ArrayList<>(List.of(LlmClient.Message.system(prompt.text())));
+        for (int turn = 1; turn <= 6; turn++) {
+            compactor.startTurn(history, LlmClient.Message.user("round " + turn + " "
+                    + (turn <= 3 ? "x".repeat(16_000) : "")));
+        }
+        assertTrue(compactor.compactIfNeeded(history, 0));
+        ToolExecutionResult timeout = new ToolExecutionResult("id", "execute_command", "{}", "", 0, true, List.of());
+        compactor.recordToolResult(timeout);
+        compactor.recordToolResult(timeout);
+        List<LlmClient.Message> core = List.copyOf(history.subList(1, history.size()));
+
+        var prepared = prompt.prepareMessages(history, compactor, null, PROFILE);
+
+        assertTrue(prepared.trimmed());
+        assertSame(history, prepared.messages());
+        assertFalse(history.get(0).content().contains("skill-index"));
+        assertEquals(core, history.subList(1, history.size()));
+        assertTrue(compactor.isRecovering());
+        assertNotSame(history, prompt.prepareMessages(history, compactor, null,
+                ContextProfile.custom(32_000, 1_000)).messages(), "fallback must leave the archive available");
+
+        history.add(LlmClient.Message.assistant("x".repeat(32_000)));
+        List<LlmClient.Message> oversizedCore = List.copyOf(history);
+        assertThrows(IOException.class, () -> prompt.prepareMessages(history, compactor, null, PROFILE));
+        assertEquals(oversizedCore, history);
+    }
 
     @Test
     void countsToolsAndStopsAfterDroppingSkillsWhenEnough() {

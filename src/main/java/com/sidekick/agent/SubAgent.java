@@ -183,7 +183,7 @@ public class SubAgent {
         String taskContent = prependSkillBodies(task.content());
 
         // 将任务注入对话
-        conversationHistory.add(ImageReferenceParser.userMessage(
+        historyCompactor.startTurn(conversationHistory, ImageReferenceParser.userMessage(
                 taskContent,
                 Path.of(toolRegistry.getProjectPath())));
 
@@ -213,11 +213,12 @@ public class SubAgent {
             try {
                 List<LlmClient.Tool> tools = shouldUseTools() && llmClient.supportsTools()
                         ? toolRegistry.getToolDefinitions() : null;
-                if (requestPrompt.trimIfNeeded(conversationHistory, tools, contextProfile) && out != null) {
+                var prepared = requestPrompt.prepareMessages(conversationHistory, historyCompactor, tools, contextProfile);
+                if (prepared.trimmed() && out != null) {
                     out.println("📦 [" + name + "] 上下文超出输入预算，已精简可选上下文。");
                 }
                 LlmClient.ChatResponse response = llmClient.chat(
-                        conversationHistory,
+                        prepared.messages(),
                         tools,
                         streamRenderer
                 );
@@ -243,6 +244,7 @@ public class SubAgent {
 
                     List<ToolExecutionResult> toolResults = executeToolCalls(response.toolCalls());
                     for (ToolExecutionResult toolResult : toolResults) {
+                        historyCompactor.recordToolResult(toolResult);
                         conversationHistory.add(LlmClient.Message.tool(toolResult.id(), toolResult.result()));
                     }
                     appendImageToolMessages(toolResults);
@@ -251,6 +253,7 @@ public class SubAgent {
 
                 // 没有工具调用，返回最终结果
                 conversationHistory.add(LlmClient.Message.assistant(response.content()));
+                historyCompactor.completeTurn();
 
                 streamRenderer.finish();
 
@@ -300,6 +303,7 @@ public class SubAgent {
     public void clearHistory() {
         LlmClient.Message systemMsg = conversationHistory.get(0);
         conversationHistory.clear();
+        historyCompactor.clear();
         conversationHistory.add(systemMsg);
     }
 

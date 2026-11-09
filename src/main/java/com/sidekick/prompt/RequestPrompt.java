@@ -4,12 +4,14 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sidekick.context.ContextProfile;
 import com.sidekick.llm.LlmClient;
+import com.sidekick.memory.ConversationHistoryCompactor;
 import com.sidekick.memory.MemoryEntry;
 import com.sidekick.memory.MemoryRetriever.RecallContext;
 import com.sidekick.memory.TokenBudget;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -50,10 +52,42 @@ public final class RequestPrompt {
         return text;
     }
 
+    public PreparedMessages prepareMessages(List<LlmClient.Message> history, ConversationHistoryCompactor compactor,
+                                            List<LlmClient.Tool> tools, ContextProfile profile) throws IOException {
+        List<LlmClient.Message> messages = compactor.withRecoveryHistory(history);
+        boolean trimmed = trimIfNeeded(messages, tools, profile);
+        if (trimmed && messages != history) {
+            history.set(0, messages.get(0));
+        }
+        boolean expanded = messages != history || (compactor.isRecovering() && compactor.hasExtraTurns(history));
+        if (expanded && exceedsInputBudget(messages, tools, profile)) {
+            log.info("Recovery history exceeds the input budget; using the default turn limit");
+            messages = history;
+            if (exceedsInputBudget(history, tools, profile)) {
+                compactor.compactToDefault(history);
+                if (exceedsInputBudget(history, tools, profile)) {
+                    throw new IOException("上下文超出输入预算，无法发送保留的对话和工具消息");
+                }
+            }
+        }
+        return new PreparedMessages(messages, trimmed);
+    }
+
+    public record PreparedMessages(List<LlmClient.Message> messages, boolean trimmed) {}
+
+    private boolean exceedsInputBudget(List<LlmClient.Message> messages, List<LlmClient.Tool> tools,
+                                       ContextProfile profile) {
+        return (long) TokenBudget.estimateMessagesTokens(messages) + estimateToolsTokens(tools) > inputBudget(profile);
+    }
+
+    private static int inputBudget(ContextProfile profile) {
+        return Math.max(1, profile.maxContextWindow() - TokenBudget.DEFAULT_RESPONSE_RESERVE);
+    }
+
     /** Apply emergency trimming after history compaction, before dispatching the request. */
     public boolean trimIfNeeded(List<LlmClient.Message> messages, List<LlmClient.Tool> tools,
                                 ContextProfile profile) {
-        int budget = Math.max(1, profile.maxContextWindow() - TokenBudget.DEFAULT_RESPONSE_RESERVE);
+        int budget = inputBudget(profile);
         int toolsTokens = estimateToolsTokens(tools);
         long before = (long) TokenBudget.estimateMessagesTokens(messages) + toolsTokens;
         long remaining = before;

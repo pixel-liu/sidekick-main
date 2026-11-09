@@ -1,40 +1,32 @@
 package com.sidekick.memory;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sidekick.llm.LlmClient;
+import com.sidekick.tool.ToolRegistry.ToolExecutionResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 
 /**
- * 压缩 ReAct 主循环里的 {@code conversationHistory}（即 {@code List<LlmClient.Message>}）。
- *
- * 与 {@link ContextCompressor} 的区别：
- * - {@code ContextCompressor} 压的是 {@link ConversationMemory}（Sidekick 的短期记忆条目）
- * - 本类压的是 Agent 实际发给 LLM 的消息列表
- *
- * 第 3 期 Memory 设计假设"LLM 调用从 shortTermMemory 重建消息"，但实际 Agent 直接维护
- * conversationHistory，与 shortTermMemory 并行。两个度量错位导致旧版压缩从未真正缩短
- * 即将发给 LLM 的 token——本类是在 Agent.run 主循环里"调 LLM 前评估并压缩"的补丁。
- *
- * 算法：
- * 1. 估算 conversationHistory 当前 token，未达 trigger 直接返回 false
- * 2. 找出所有 user message 的索引；保留最近 retainRecentRounds 个 user 起算的尾部
- * 3. 把 system 之后、splitIdx 之前的全部消息喂给 LLM 摘要
- * 4. 重建：[system] + [user("[已压缩的历史对话摘要]\n" + summary)] +
- *         [assistant("好的，已了解上下文。请继续。")] + [尾部保留消息]
- *
- * 关键约束：分割点必然落在 user message 边界，避免切断 tool_call / tool_result 的成对协议。
+ * Compacts the messages sent to the model. Each instance belongs to one conversation.
+ * Turn boundaries come from the agent entry point so injected messages and tool exchanges stay in their turn.
  */
 public class ConversationHistoryCompactor {
 
     private static final Logger log = LoggerFactory.getLogger(ConversationHistoryCompactor.class);
 
     private static final int DEFAULT_RETAIN_RECENT_ROUNDS = 3;
+    private static final int RECOVERY_EXTRA_ROUNDS = 2;
+    private static final int RECOVERY_CLEAN_ROUNDS = 2;
     private static final int MAX_SUMMARY_INPUT_CHARS = 60_000;
+    private static final ObjectMapper mapper = new ObjectMapper();
 
     private static final String SUMMARY_PROMPT = """
             请把下面的对话历史压缩成简明摘要，保留：
@@ -53,6 +45,12 @@ public class ConversationHistoryCompactor {
 
     private LlmClient llmClient;
     private final int retainRecentRounds;
+    private final List<Integer> turnStarts = new ArrayList<>();
+    private final Deque<List<LlmClient.Message>> archivedTurns = new ArrayDeque<>();
+    private int summaryIndex = -1;
+    private ToolOperation previousFailure;
+    private int recoveryRoundsRemaining;
+    private boolean anomalyInCurrentTurn;
 
     public ConversationHistoryCompactor(LlmClient llmClient) {
         this(llmClient, DEFAULT_RETAIN_RECENT_ROUNDS);
@@ -67,6 +65,77 @@ public class ConversationHistoryCompactor {
         this.llmClient = llmClient;
     }
 
+    public void startTurn(List<LlmClient.Message> history, LlmClient.Message input) {
+        turnStarts.add(history.size());
+        history.add(input);
+        anomalyInCurrentTurn = false;
+    }
+
+    public void completeTurn() {
+        if (isRecovering() && !anomalyInCurrentTurn) {
+            recoveryRoundsRemaining--;
+        }
+    }
+
+    public void recordToolResult(ToolExecutionResult result) {
+        if (!result.failedOrTimedOut()) {
+            previousFailure = null;
+            return;
+        }
+        String arguments = result.argumentsJson();
+        Object normalizedArguments = arguments;
+        if (arguments != null) {
+            try {
+                normalizedArguments = mapper.readTree(arguments);
+            } catch (JsonProcessingException ignored) {
+                // An invalid JSON call can still be retried verbatim.
+            }
+        }
+        ToolOperation operation = new ToolOperation(result.name(), normalizedArguments);
+        if (operation.equals(previousFailure)) {
+            recoveryRoundsRemaining = RECOVERY_CLEAN_ROUNDS;
+            anomalyInCurrentTurn = true;
+        }
+        previousFailure = operation;
+    }
+
+    public boolean isRecovering() {
+        return recoveryRoundsRemaining > 0;
+    }
+
+    public boolean hasExtraTurns(List<LlmClient.Message> history) {
+        return turnIndices(history).size() > retainRecentRounds;
+    }
+
+    public void clear() {
+        turnStarts.clear();
+        archivedTurns.clear();
+        summaryIndex = -1;
+        previousFailure = null;
+        recoveryRoundsRemaining = 0;
+        anomalyInCurrentTurn = false;
+    }
+
+    /** Adds only the archived turns needed for recovery to a temporary request. */
+    public List<LlmClient.Message> withRecoveryHistory(List<LlmClient.Message> history) {
+        if (!isRecovering() || archivedTurns.isEmpty()) return history;
+        int count = Math.min(archivedTurns.size(), recoveryRetainRounds() - turnIndices(history).size());
+        if (count <= 0) return history;
+
+        List<LlmClient.Message> request = new ArrayList<>(history);
+        LlmClient.Message summary = history.get(summaryIndex);
+        request.set(summaryIndex, LlmClient.Message.user(summary.content()
+                + "\n\n[接下来补回 " + count + " 轮已被此摘要覆盖的对话原文，重叠内容的细节以原文为准。]"));
+        int insertAt = summaryIndex + 2;
+        int skip = archivedTurns.size() - count;
+        for (List<LlmClient.Message> turn : archivedTurns) {
+            if (skip-- > 0) continue;
+            request.addAll(insertAt, turn);
+            insertAt += turn.size();
+        }
+        return request;
+    }
+
     /**
      * 评估并按需压缩 history，原地修改。
      *
@@ -75,7 +144,12 @@ public class ConversationHistoryCompactor {
      * @return 是否真的压缩了
      */
     public boolean compactIfNeeded(List<LlmClient.Message> history, int triggerTokens) {
-        return compact(history, triggerTokens, false, retainRecentRounds);
+        int retain = isRecovering() ? recoveryRetainRounds() : retainRecentRounds;
+        return compact(history, triggerTokens, false, retain);
+    }
+
+    public boolean compactToDefault(List<LlmClient.Message> history) {
+        return compact(history, 0, true, retainRecentRounds);
     }
 
     /**
@@ -95,20 +169,10 @@ public class ConversationHistoryCompactor {
 
         int systemEnd = "system".equals(history.get(0).role()) ? 1 : 0;
 
-        List<Integer> userIndices = new ArrayList<>();
-        for (int i = systemEnd; i < history.size(); i++) {
-            if ("user".equals(history.get(i).role())) {
-                userIndices.add(i);
-            }
-        }
-        int effectiveRetainRounds = Math.max(1, retainRounds);
-        if (userIndices.size() <= effectiveRetainRounds) {
-            log.info("compactIfNeeded skip: only {} user turns, < retain {}",
-                    userIndices.size(), effectiveRetainRounds);
-            return false;
-        }
-
-        int splitIdx = userIndices.get(userIndices.size() - effectiveRetainRounds);
+        List<Integer> indices = turnIndices(history);
+        int splitTurn = indices.size() - retainRounds;
+        if (splitTurn <= 0) return false;
+        int splitIdx = indices.get(splitTurn);
         if (splitIdx <= systemEnd) return false;
 
         List<LlmClient.Message> oldMsgs = new ArrayList<>(history.subList(systemEnd, splitIdx));
@@ -135,14 +199,48 @@ public class ConversationHistoryCompactor {
         rebuilt.addAll(history.subList(splitIdx, history.size()));
 
         int afterTokens = TokenBudget.estimateMessagesTokens(rebuilt);
+        int beforeSize = history.size();
+        archiveTurns(history, indices, splitTurn);
+        if (!turnStarts.isEmpty()) {
+            turnStarts.subList(0, splitTurn).clear();
+            turnStarts.replaceAll(index -> index - splitIdx + systemEnd + 2);
+        }
+        summaryIndex = systemEnd;
         history.clear();
         history.addAll(rebuilt);
         log.info(String.format(Locale.ROOT,
                 "compacted conversationHistory: tokens %d -> %d, messages %d -> %d, summary chars %d",
-                currentTokens, afterTokens, userIndices.size() + systemEnd /* 估值 */, rebuilt.size(),
+                currentTokens, afterTokens, beforeSize, rebuilt.size(),
                 summary.length()));
         return true;
     }
+
+    private List<Integer> turnIndices(List<LlmClient.Message> history) {
+        if (!turnStarts.isEmpty()) return turnStarts;
+        List<Integer> indices = new ArrayList<>();
+        for (int i = 0; i < history.size(); i++) {
+            if (i != summaryIndex && "user".equals(history.get(i).role())) {
+                indices.add(i);
+            }
+        }
+        return indices;
+    }
+
+    private void archiveTurns(List<LlmClient.Message> history, List<Integer> indices, int splitTurn) {
+        for (int i = Math.max(0, splitTurn - RECOVERY_EXTRA_ROUNDS); i < splitTurn; i++) {
+            // Apply the same historical image policy as the agents.
+            archivedTurns.addLast(history.subList(indices.get(i), indices.get(i + 1)).stream()
+                    .map(LlmClient.Message::withoutImageContent)
+                    .toList());
+            if (archivedTurns.size() > RECOVERY_EXTRA_ROUNDS) archivedTurns.removeFirst();
+        }
+    }
+
+    private int recoveryRetainRounds() {
+        return retainRecentRounds + RECOVERY_EXTRA_ROUNDS;
+    }
+
+    private record ToolOperation(String name, Object arguments) {}
 
     /**
      * 真正调 LLM 摘要。包可见以便测试通过子类替换。

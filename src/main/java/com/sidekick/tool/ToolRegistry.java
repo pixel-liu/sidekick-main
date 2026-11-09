@@ -1606,6 +1606,9 @@ public class ToolRegistry {
     public record ToolExecutionResult(String id, String name, String argumentsJson,
                                       String result, long elapsedMillis, boolean timedOut,
                                       List<com.sidekick.llm.LlmClient.ContentPart> imageParts) {
+        private static final Pattern NONZERO_COMMAND_EXIT = Pattern.compile(
+                "^命令执行完成 \\(exit code: -?[1-9][0-9]*\\)");
+
         private static ToolExecutionResult completed(ToolInvocation invocation, ToolOutput output, long elapsedMillis) {
             return new ToolExecutionResult(
                     invocation.id(),
@@ -1639,6 +1642,33 @@ public class ToolRegistry {
 
         public boolean hasImageParts() {
             return imageParts != null && !imageParts.isEmpty();
+        }
+
+        /** Match the failure formats emitted by the registry and its legacy text tools. */
+        public boolean failedOrTimedOut() {
+            if (timedOut) return true;
+            if (result == null || result.startsWith("工具执行失败: 用户取消")) return false;
+            if (result.startsWith("工具执行失败: ") || result.startsWith("未知工具: ")
+                    || result.startsWith("MCP 工具返回错误: ") || result.startsWith("MCP 工具调用失败 (")) {
+                return true;
+            }
+            return switch (name) {
+                case "execute_command" -> result.startsWith("执行命令失败: ")
+                        || result.startsWith("命令执行超时（") || NONZERO_COMMAND_EXIT.matcher(result).find();
+                case "read_file" -> result.startsWith("读取文件失败: ");
+                case "write_file" -> result.startsWith("写入文件失败: ");
+                case "list_dir" -> result.startsWith("列出目录失败: ");
+                case "glob_files" -> result.startsWith("文件匹配失败: ");
+                case "grep_code" -> result.startsWith("代码搜索失败: ");
+                case "search_code" -> result.startsWith("代码检索失败: ");
+                case "create_project" -> result.startsWith("创建项目失败: ");
+                case "web_search" -> result.startsWith("搜索失败 (");
+                case "web_fetch" -> result.startsWith("抓取失败: ");
+                case "load_skill" -> result.startsWith("load_skill 失败: ");
+                case "save_memory" -> result.startsWith("保存长期记忆失败: ");
+                case "revert_turn" -> result.startsWith("恢复快照失败: ");
+                default -> false;
+            };
         }
     }
 
