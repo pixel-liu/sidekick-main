@@ -24,6 +24,8 @@ Read SideKick.md for the shared architecture and development commands.
 
 ## Request context budget
 
+- ReAct accepts explicit `<!-- sidekick:pin ID -->` and `<!-- /sidekick:pin -->` blocks from user input. Keep their original text in session memory and send one copy as user context. Put only an ID reference in history, summaries, and recovery archives. Replacing an ID updates the active text. An `<!-- sidekick:unpin ID -->` line or `/clear` removes active text.
+- Limit active pinned text to 16 entries and 8 KiB of UTF-8 per session. Count it in the model input budget and preserve it when trimming optional context or falling back from recovery. Report invalid blocks, quota violations, and remaining input overflow before sending the affected request.
 - Count turns from actual user or task entry points. Automatic history compaction normally preserves three turns. Two consecutive failed or timed-out calls to the same tool with equivalent JSON arguments temporarily preserve five. Return to three after two subsequently completed turns without a new trigger.
 - Cache up to two compacted turns per conversation. Restore only the needed turns in the outbound request, annotate their overlap with the summary, and drop the archive when clearing history. Keep the historical image policy and complete tool-call pairs.
 - After history compaction, trim optional prompt context in this order: Skills index, lower-ranked recalls (keep the best match and importance ≥ 0.8), then explicitly marked optional project-memory blocks from last to first. Preserve core messages, tool-call pairs, and unmarked project rules.

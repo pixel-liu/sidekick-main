@@ -29,6 +29,26 @@ class RequestPromptTest {
     @TempDir Path tempDir;
 
     @Test
+    void countsPinnedTextInBudgetAndKeepsItDuringOptionalTrimming() throws IOException {
+        RequestPrompt prompt = assembler.prepare(PromptMode.AGENT, context(), null);
+        ConversationHistoryCompactor compactor = new ConversationHistoryCompactor(null);
+        String constraint = "验收条款 " + "p".repeat(400);
+        compactor.registerPinnedConstraints("<!-- sidekick:pin R1 -->\n" + constraint + "\n<!-- /sidekick:pin -->");
+        List<LlmClient.Message> history = request(prompt, -10);
+
+        var prepared = prompt.prepareMessages(history, compactor, null, PROFILE);
+
+        assertTrue(prepared.trimmed());
+        assertTrue(prepared.messages().get(1).content().contains(constraint));
+        assertEquals(history.get(0), prepared.messages().get(0));
+        assertFalse(history.get(0).content().contains("skill-index"));
+        assertEquals(history.subList(1, history.size()), prepared.messages().subList(2, prepared.messages().size()));
+
+        history.add(LlmClient.Message.assistant("x".repeat(32_000)));
+        assertThrows(IOException.class, () -> prompt.prepareMessages(history, compactor, null, PROFILE));
+    }
+
+    @Test
     void overBudgetRecoveryFallsBackWithoutMutatingCoreHistory() throws IOException {
         RequestPrompt prompt = assembler.prepare(PromptMode.AGENT, context(), null);
         ConversationHistoryCompactor compactor = new ConversationHistoryCompactor(null) {

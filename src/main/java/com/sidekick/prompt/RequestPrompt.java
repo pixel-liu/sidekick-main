@@ -54,20 +54,26 @@ public final class RequestPrompt {
 
     public PreparedMessages prepareMessages(List<LlmClient.Message> history, ConversationHistoryCompactor compactor,
                                             List<LlmClient.Tool> tools, ContextProfile profile) throws IOException {
-        List<LlmClient.Message> messages = compactor.withRecoveryHistory(history);
+        List<LlmClient.Message> recovered = compactor.withRecoveryHistory(history);
+        boolean expanded = recovered != history || (compactor.isRecovering() && compactor.hasExtraTurns(history));
+        List<LlmClient.Message> messages = compactor.withPinnedConstraints(recovered);
+        boolean pinned = messages != recovered;
         boolean trimmed = trimIfNeeded(messages, tools, profile);
         if (trimmed && messages != history) {
             history.set(0, messages.get(0));
         }
-        boolean expanded = messages != history || (compactor.isRecovering() && compactor.hasExtraTurns(history));
-        if (expanded && exceedsInputBudget(messages, tools, profile)) {
-            log.info("Recovery history exceeds the input budget; using the default turn limit");
-            messages = history;
-            if (exceedsInputBudget(history, tools, profile)) {
+        if ((expanded || pinned) && exceedsInputBudget(messages, tools, profile)) {
+            if (expanded) {
+                log.info("Recovery history exceeds the input budget; using the default turn limit");
+                messages = compactor.withPinnedConstraints(history);
+            }
+            if (exceedsInputBudget(messages, tools, profile) && compactor.hasExtraTurns(history)) {
                 compactor.compactToDefault(history);
-                if (exceedsInputBudget(history, tools, profile)) {
-                    throw new IOException("上下文超出输入预算，无法发送保留的对话和工具消息");
-                }
+                messages = compactor.withPinnedConstraints(history);
+            }
+            if (exceedsInputBudget(messages, tools, profile)) {
+                throw new IOException("上下文超出输入预算，无法发送保留的对话和工具消息"
+                        + (pinned ? "（含固定条款）" : ""));
             }
         }
         return new PreparedMessages(messages, trimmed);

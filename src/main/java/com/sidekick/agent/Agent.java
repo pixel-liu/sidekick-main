@@ -131,9 +131,15 @@ public class Agent {
      */
     public String run(String userInput) {
         log.info("ReAct run started: inputLength={}", userInput == null ? 0 : userInput.length());
+        String historyInput;
+        try {
+            historyInput = historyCompactor.registerPinnedConstraints(userInput);
+        } catch (IllegalArgumentException e) {
+            return "❌ " + e.getMessage();
+        }
         pruneHistoricalImagePayloads();
         // 存入短期记忆
-        memoryManager.addUserMessage(userInput);
+        memoryManager.addUserMessage(historyInput);
         storeExplicitBrowserMemoryHint(userInput);
 
         // 检索相关长期记忆，注入到 system prompt
@@ -144,7 +150,7 @@ public class Agent {
         // 添加用户输入到历史（如有 skill body 注入，前置到原文之前）
 //        String userMessageContent = prependSkillBodies(userInput);
         historyCompactor.startTurn(conversationHistory, ImageReferenceParser.userMessage(
-                userInput,
+                historyInput,
                 Path.of(toolRegistry.getProjectPath())));
         StringBuilder reasoningTranscript = new StringBuilder();
         StreamRenderer streamRenderer = new StreamRenderer(renderer());
@@ -303,8 +309,12 @@ public class Agent {
         long beforeTokens = estimateCurrentContextTokens();
         try {
             boolean compacted = historyCompactor.compactNow(conversationHistory);
-            boolean trimmed = requestPrompt.trimIfNeeded(conversationHistory,
+            List<LlmClient.Message> messages = historyCompactor.withPinnedConstraints(conversationHistory);
+            boolean trimmed = requestPrompt.trimIfNeeded(messages,
                     llmClient.supportsTools() ? toolRegistry.getToolDefinitions() : null, memoryManager.getContextProfile());
+            if (trimmed && messages != conversationHistory) {
+                conversationHistory.set(0, messages.get(0));
+            }
             return new CompactionResult(compacted || trimmed, beforeTokens, estimateCurrentContextTokens(), null);
         } catch (Exception e) {
             log.warn("manual conversationHistory compaction failed", e);
@@ -462,7 +472,7 @@ public class Agent {
         // 分类估算 token 占用
         int systemTokens = 0, userTokens = 0, assistantTokens = 0, toolTokens = 0;
         int systemCount = 0, userCount = 0, assistantCount = 0, toolCount = 0;
-        for (LlmClient.Message msg : conversationHistory) {
+        for (LlmClient.Message msg : projectedContext()) {
             int t = com.sidekick.memory.TokenBudget.estimateMessagesTokens(java.util.List.of(msg));
             switch (msg.role()) {
                 case "system" -> { systemTokens += t; systemCount++; }
@@ -514,9 +524,12 @@ public class Agent {
     }
 
     private long estimateCurrentContextTokens() {
-        long messageTokens = com.sidekick.memory.TokenBudget.estimateMessagesTokens(
-                historyCompactor.withRecoveryHistory(conversationHistory));
+        long messageTokens = com.sidekick.memory.TokenBudget.estimateMessagesTokens(projectedContext());
         return Math.max(0L, messageTokens + estimateToolsSchemaTokens());
+    }
+
+    private List<LlmClient.Message> projectedContext() {
+        return historyCompactor.withPinnedConstraints(historyCompactor.withRecoveryHistory(conversationHistory));
     }
 
     private void logRequestContext(String scope, List<LlmClient.Message> requestMessages, List<LlmClient.Tool> tools) {

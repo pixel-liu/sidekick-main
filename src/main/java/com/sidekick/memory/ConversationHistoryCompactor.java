@@ -36,6 +36,7 @@ public class ConversationHistoryCompactor {
             4. 仍未解决的问题或待办
 
             不要复述每条原文，不要列举所有工具调用，不要保留无关闲聊。
+            固定条款的正文会单独提供。摘要可以引用条款编号，勿推测占位符所代表的正文。
             输出 1-3 段中文，不要用列表，不要加任何前缀或元描述。
 
             === 待压缩的对话 ===
@@ -47,6 +48,7 @@ public class ConversationHistoryCompactor {
     private final int retainRecentRounds;
     private final List<Integer> turnStarts = new ArrayList<>();
     private final Deque<List<LlmClient.Message>> archivedTurns = new ArrayDeque<>();
+    private final PinnedTaskConstraints pinnedConstraints = new PinnedTaskConstraints();
     private int summaryIndex = -1;
     private ToolOperation previousFailure;
     private int recoveryRoundsRemaining;
@@ -69,6 +71,20 @@ public class ConversationHistoryCompactor {
         turnStarts.add(history.size());
         history.add(input);
         anomalyInCurrentTurn = false;
+    }
+
+    /** Accept directives only from the actual user input, before tools or agents can add messages. */
+    public String registerPinnedConstraints(String userInput) {
+        return pinnedConstraints.register(userInput);
+    }
+
+    public List<LlmClient.Message> withPinnedConstraints(List<LlmClient.Message> messages) {
+        LlmClient.Message constraints = pinnedConstraints.requestMessage();
+        if (constraints == null) return messages;
+        List<LlmClient.Message> request = new ArrayList<>(messages);
+        int insertAt = !request.isEmpty() && "system".equals(request.get(0).role()) ? 1 : 0;
+        request.add(insertAt, constraints);
+        return request;
     }
 
     public void completeTurn() {
@@ -110,6 +126,7 @@ public class ConversationHistoryCompactor {
     public void clear() {
         turnStarts.clear();
         archivedTurns.clear();
+        pinnedConstraints.clear();
         summaryIndex = -1;
         previousFailure = null;
         recoveryRoundsRemaining = 0;
@@ -164,7 +181,7 @@ public class ConversationHistoryCompactor {
 
     private boolean compact(List<LlmClient.Message> history, int triggerTokens, boolean force, int retainRounds) {
         if (history == null || history.isEmpty()) return false;
-        int currentTokens = TokenBudget.estimateMessagesTokens(history);
+        int currentTokens = TokenBudget.estimateMessagesTokens(withPinnedConstraints(history));
         if (!force && currentTokens < triggerTokens) return false;
 
         int systemEnd = "system".equals(history.get(0).role()) ? 1 : 0;
@@ -198,7 +215,7 @@ public class ConversationHistoryCompactor {
         rebuilt.add(LlmClient.Message.assistant("好的，我已了解之前的上下文，请继续。"));
         rebuilt.addAll(history.subList(splitIdx, history.size()));
 
-        int afterTokens = TokenBudget.estimateMessagesTokens(rebuilt);
+        int afterTokens = TokenBudget.estimateMessagesTokens(withPinnedConstraints(rebuilt));
         int beforeSize = history.size();
         archiveTurns(history, indices, splitTurn);
         if (!turnStarts.isEmpty()) {

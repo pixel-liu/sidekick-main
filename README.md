@@ -134,6 +134,20 @@ MCP 配置文件不存在时会创建默认 Chrome DevTools 配置。自定义 M
 
 可在项目记忆文件中用独立成行的 `<!-- sidekick:optional -->` 和 `<!-- /sidekick:optional -->` 包住可省略的背景说明。多个可选块从后往前移除。未标记的项目规则、已加载的 Skill 正文和核心对话保留。如果可选内容用完后估算仍超限，SideKick 会记录日志，并由模型服务判断能否接受请求。
 
+### 固定需求和已确认的方案
+
+在 ReAct 中，将以下标记和条款作为一条多行消息发送。两条标记各占一行。
+
+```text
+<!-- sidekick:pin R1 -->
+同一个操作连续两次失败或超时才扩窗。
+<!-- /sidekick:pin -->
+```
+
+编号可用 1–32 个英文字母、数字、连字符或下划线。同一编号的新块会替换旧条款。单独发送 `<!-- sidekick:unpin R1 -->` 可取消该条款，`/clear` 可清除当前会话的所有条款。正文仅存于会话内存，最多 16 条，UTF-8 合计最多 8 KiB。
+
+压缩仍按轮次切分。固定正文单独随模型请求发送，摘要和扩窗补回的轮次里只保留条款编号。固定正文计入输入预算。裁剪可选内容和必要的历史压缩后仍超预算时，SideKick 会在发送前报错。
+
 ## 长期记忆容量与去重
 
 长期记忆在原有字段之外存储 `content_hash`、`importance`、`confidence`、`access_count`、`updated_at` 和 `last_accessed_at`。两项评分范围为 0–1，默认均为 0.5；`save_memory` 工具支持可选的 `importance` / `confidence` 参数，Java 调用可使用 `storeFact(fact, scope, importance, confidence)`。

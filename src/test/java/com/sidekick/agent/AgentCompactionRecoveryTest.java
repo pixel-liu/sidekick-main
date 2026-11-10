@@ -8,6 +8,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -15,6 +17,7 @@ class AgentCompactionRecoveryTest {
     @Test
     void secondFailureRestoresArchivedTurnInNextRequest(@TempDir Path project) {
         RecordingClient llm = new RecordingClient();
+        String constraint = "只可用中文提交，保留 Git 标签 v1.0。";
         ToolRegistry tools = new ToolRegistry() {
             @Override
             public String executeTool(String name, String argumentsJson) {
@@ -25,10 +28,18 @@ class AgentCompactionRecoveryTest {
         Agent agent = new Agent(llm, tools);
 
         for (int turn = 1; turn <= 6; turn++) {
-            agent.run("turn-" + turn + " " + "x".repeat(turn == 6 ? 24_000 : 12_000));
+            String input = "turn-" + turn + " " + "x".repeat(turn == 6 ? 24_000 : 12_000);
+            if (turn == 3) {
+                input += "\n<!-- sidekick:pin git -->\n" + constraint + "\n<!-- /sidekick:pin -->";
+            }
+            agent.run(input);
         }
         assertFalse(hasTurn(llm.requests.get(5), 3), "turn 3 should already be summarized");
         assertTrue(hasTurn(llm.requests.get(5), 4));
+        assertTrue(contents(llm.requests.get(5)).contains(constraint));
+        assertTrue(llm.summaryInputs.stream().anyMatch(input -> input.contains("turn-3")
+                && input.contains("固定条款 git 的正文由当前条款区提供")));
+        assertTrue(llm.summaryInputs.stream().noneMatch(input -> input.contains(constraint)));
 
         agent.run("turn-7");
 
@@ -45,7 +56,18 @@ class AgentCompactionRecoveryTest {
                 && message.content().contains("重叠内容的细节以原文为准")));
         assertEquals(List.of("retry-1", "retry-2"), recovery.stream()
                 .filter(message -> "tool".equals(message.role())).map(LlmClient.Message::toolCallId).toList());
+        String recoveredText = contents(recovery);
+        assertTrue(recoveredText.contains(constraint));
+        assertEquals(recoveredText.indexOf(constraint), recoveredText.lastIndexOf(constraint));
         assertFalse(hasTurn(agent.getConversationHistory(), 3), "restored messages are temporary");
+
+        agent.clearHistory();
+        agent.run("new conversation");
+        assertFalse(contents(llm.requests.get(9)).contains(constraint));
+    }
+
+    private static String contents(List<LlmClient.Message> messages) {
+        return messages.stream().map(LlmClient.Message::content).filter(Objects::nonNull).collect(Collectors.joining("\n"));
     }
 
     private static boolean hasTurn(List<LlmClient.Message> messages, int turn) {
@@ -55,9 +77,11 @@ class AgentCompactionRecoveryTest {
 
     private static class RecordingClient implements LlmClient {
         private final List<List<Message>> requests = new ArrayList<>();
+        private final List<String> summaryInputs = new ArrayList<>();
 
         @Override
         public ChatResponse chat(List<Message> messages, List<Tool> tools) {
+            summaryInputs.add(contents(messages));
             return new ChatResponse("assistant", "old conversation summary", null, 1, 1);
         }
 
