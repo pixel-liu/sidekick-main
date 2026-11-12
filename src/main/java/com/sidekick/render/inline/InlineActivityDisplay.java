@@ -1,5 +1,6 @@
 package com.sidekick.render.inline;
 
+import com.sidekick.util.AnsiStyle;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStyle;
@@ -28,7 +29,10 @@ final class InlineActivityDisplay implements AutoCloseable {
     private static final int MAX_REASONING_ROWS = 4;
     private static final String[] SPINNER_FRAMES = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
     private static final AttributedStyle STATUS_STYLE = AttributedStyle.DEFAULT.italic();
-    private static final AttributedStyle QUOTE_STYLE = AttributedStyle.DEFAULT.faint().italic();
+    private static final AttributedStyle QUOTE_STYLE = AnsiStyle.isEnabled()
+            ? AttributedStyle.DEFAULT.foreground(AnsiStyle.THINKING_GRAY_INDEX)
+            : AttributedStyle.DEFAULT;
+    private static final AttributedStyle THINKING_TITLE_STYLE = QUOTE_STYLE.italic();
 
     private final Terminal terminal;
     private final PrintStream renderLock;
@@ -235,7 +239,7 @@ final class InlineActivityDisplay implements AutoCloseable {
         String suffix = showCancelHint
                 ? " (esc to cancel, " + elapsedSeconds() + "s)"
                 : " (" + elapsedSeconds() + "s)";
-        lines.add(fit("  " + spinner() + " " + label + "..." + suffix, cols, STATUS_STYLE));
+        lines.add(fit("  " + spinner() + " " + label + "..." + suffix, cols, THINKING_TITLE_STYLE));
 
         List<String> quoteLines = reasoningLines();
         int quoteWidth = Math.max(12, cols - 4);

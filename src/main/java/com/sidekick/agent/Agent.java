@@ -1114,7 +1114,7 @@ public class Agent {
             for (String line : reasoning.split("\\R+")) {
                 String normalized = line.replaceAll("\\s+", " ").trim();
                 if (!normalized.isEmpty()) {
-                    out().println(AnsiStyle.subtle("│ " + normalized));
+                    out().println(AnsiStyle.thinkingQuote("│ " + normalized));
                 }
             }
             out().println();

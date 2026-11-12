@@ -4,6 +4,8 @@ package com.sidekick.util;
  * 终端 ANSI 样式辅助。
  */
 public final class AnsiStyle {
+    public static final int THINKING_GRAY_INDEX = 250;
+
     private static final String RESET = "\u001B[0m";
     private static final String BOLD = "\u001B[1m";
     private static final String DIM = "\u001B[2m";
@@ -13,6 +15,7 @@ public final class AnsiStyle {
     private static final String YELLOW = "\u001B[33m";
     private static final String RED = "\u001B[31m";
     private static final String GRAY = "\u001B[90m";
+    private static final String THINKING_GRAY = "\u001B[38;5;" + THINKING_GRAY_INDEX + "m";
     private static final String BRIGHT_WHITE = "\u001B[97m";
     private static final String PURPLE = "\u001B[38;5;141m";
     private static final String BG_PANEL = "\u001B[48;5;236m";
@@ -42,7 +45,11 @@ public final class AnsiStyle {
     }
 
     public static String thinking(String text) {
-        return wrap(ITALIC + GRAY, text);
+        return wrap(ITALIC + THINKING_GRAY, text);
+    }
+
+    public static String thinkingQuote(String text) {
+        return wrap(THINKING_GRAY, text);
     }
 
     public static String userMessageBlock(String text, int columns) {
