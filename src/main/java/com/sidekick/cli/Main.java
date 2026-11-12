@@ -77,10 +77,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Locale;
+import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
@@ -3019,5 +3016,17 @@ public class Main {
     }
 
     private record MemorySaveRequest(String fact, String scope) {
+    }
+
+    private boolean test1(int[] arr){
+        Set<Integer> set = new HashSet<>();
+
+        for(int i = 0; i < arr.length; i++){
+            if(set.contains(arr[i])){
+                return false;
+            }
+            set.add(arr[i]);
+        }
+        return true;
     }
 }
