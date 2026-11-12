@@ -202,6 +202,7 @@ class MainInputNormalizationTest {
         assertTrue(choices.contains("/model freellmapi"), choices);
         assertTrue(choices.contains("/model xfyun"), choices);
         assertTrue(choices.contains("/browser status"), choices);
+        assertFalse(choices.contains("/wechat"), choices);
         assertFalse(choices.contains("do you wish"), choices);
         assertTrue(choices.lines().count() < Main.slashCommandHints().size(),
                 "choices should be compact multi-column output");

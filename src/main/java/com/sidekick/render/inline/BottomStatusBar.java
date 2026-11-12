@@ -11,6 +11,7 @@ import org.jline.utils.Status;
 
 import java.io.PrintStream;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -22,7 +23,11 @@ import java.util.regex.Pattern;
  */
 public final class BottomStatusBar implements AutoCloseable {
 
-    private static final String SEPARATOR = " · ";
+    private static final String GAP = "  ";
+    private static final int BAR_WIDTH = 8;
+    private static final int MIN_MODEL_WIDTH = 10;
+    private static final int MIN_PATH_WIDTH = 12;
+    private static final String PARTIAL_BLOCKS = "▏▎▍▌▋▊▉";
     private static final Pattern SKILL_RATIO = Pattern.compile("Skill (\\d+)/(\\d+)");
     private static final AttributedStyle BASE_STYLE = style(AttributedStyle.DEFAULT
             .foreground(AttributedStyle.BRIGHT | AttributedStyle.WHITE));
@@ -31,6 +36,13 @@ public final class BottomStatusBar implements AutoCloseable {
             .foreground(AttributedStyle.BRIGHT | AttributedStyle.YELLOW).bold());
     private static final AttributedStyle CRITICAL_STYLE = style(AttributedStyle.DEFAULT
             .foreground(AttributedStyle.BRIGHT | AttributedStyle.RED).bold());
+
+    private static final AttributedStyle CYAN_STYLE = palette(117);
+    private static final AttributedStyle SKILL_STYLE = palette(183);
+    private static final AttributedStyle USAGE_STYLE = palette(156);
+    private static final AttributedStyle COST_STYLE = palette(222);
+    private static final AttributedStyle SECONDARY_STYLE = palette(250);
+    private static final AttributedStyle TRACK_STYLE = palette(246);
 
     private final Terminal terminal;
     private final PrintStream out;
@@ -143,55 +155,116 @@ public final class BottomStatusBar implements AutoCloseable {
     }
 
     private static AttributedString formatSessionLine(StatusInfo info, int cols) {
-        String mode = info.hitlEnabled() ? "HITL" : "YOLO";
         String model = info.model() == null || info.model().isBlank() ? "Auto Model" : info.model().trim();
+        String mode = info.hitlEnabled() ? "HITL" : "";
         String phase = info.phase() == null ? "" : info.phase().trim();
         if ("idle".equalsIgnoreCase(phase)) {
             phase = "";
         }
+        String path = compactCwd();
         long total = Math.max(0L, info.totalTokens());
         long window = Math.max(0L, info.contextWindow());
-        int percent = window == 0L ? 0 : (int) Math.min(100L, Math.round(total * 100.0 / window));
+        double ratio = window == 0L ? 0 : Math.min(1.0, (double) total / window);
+        int percent = (int) Math.round(ratio * 100);
         String contextLabel = "ctx " + percent + "%";
-        int modelRoom = cols - mode.length() - 2 * SEPARATOR.length() - contextLabel.length();
+
+        int room = cols - contextLabel.length();
+        int minModel = Math.min(MIN_MODEL_WIDTH, width(model)) + GAP.length();
+        int minPath = path.isEmpty() ? 0 : Math.min(MIN_PATH_WIDTH, width(path)) + GAP.length();
+        int minBar = 1 + GAP.length();
+        int reservedMode = !mode.isEmpty() && room >= minBar + minModel + fieldWidth(mode)
+                ? fieldWidth(mode) : 0;
+        int reservedPath = room >= minBar + minModel + reservedMode + minPath ? minPath : 0;
+        int barWidth = Math.min(BAR_WIDTH, Math.max(0, room - minModel - reservedMode - reservedPath - GAP.length()));
+        // Even a very narrow terminal can still show one block next to the percentage.
+        if (barWidth == 0 && room >= minBar) {
+            barWidth = 1;
+        }
+        room -= barWidth == 0 ? 0 : barWidth + GAP.length();
+
         AttributedStringBuilder line = new AttributedStringBuilder();
-        line.append(mode, info.hitlEnabled() ? EMPHASIS_STYLE : WARNING_STYLE);
-        appendField(line, shorten(model, modelRoom, false), EMPHASIS_STYLE, cols);
+        if (reservedMode > 0) {
+            line.append(mode, EMPHASIS_STYLE);
+        }
+        appendField(line, shorten(model, room - reservedMode - reservedPath - GAP.length(), false),
+                EMPHASIS_STYLE, cols);
         AttributedStringBuilder context = new AttributedStringBuilder();
-        context.append("ctx ", BASE_STYLE).append(percent + "%", contextPercentStyle(percent));
-        String contextSize = " (" + formatTokens(total) + "/" + formatTokens(window) + ")";
-        int phaseWidth = fieldWidth(phase);
-        if (line.columnLength() + SEPARATOR.length() + context.columnLength() + contextSize.length() + phaseWidth <= cols) {
-            context.append(contextSize, BASE_STYLE);
+        AttributedStyle levelStyle = contextPercentStyle(percent);
+        context.append("ctx ", BASE_STYLE).append(percent + "%", levelStyle);
+        if (barWidth > 0) {
+            context.append(GAP);
+            appendProgress(context, ratio, barWidth, levelStyle);
+        }
+        if (line.length() == 0 && context.columnLength() > cols) {
+            return fitToColumns(context.toAttributedString(), cols);
         }
         appendField(line, context.toAttributedString(), cols);
-        appendField(line, phase, WARNING_STYLE, cols);
+
+        // Reserve the full path when possible; longer directories keep their last components.
+        int pathWidth = Math.min(width(path), Math.max(0, cols - line.columnLength() - GAP.length()));
+        if (pathWidth < minPath - GAP.length()) {
+            pathWidth = 0;
+        }
+        int pathField = pathWidth > 0 ? pathWidth + GAP.length() : 0;
+        appendField(line, "(" + formatTokens(total) + "/" + formatTokens(window) + ")",
+                SECONDARY_STYLE, cols - pathField - fieldWidth(phase));
+        appendField(line, phase, WARNING_STYLE, cols - pathField);
+        if (pathWidth > 0) {
+            String shownPath = shorten(path, pathWidth, true);
+            line.append(" ".repeat(cols - line.columnLength() - width(shownPath)));
+            line.append(shownPath, SECONDARY_STYLE);
+        }
         return fitToColumns(line.toAttributedString(), cols);
     }
 
+    private static void appendProgress(AttributedStringBuilder context, double ratio, int barWidth, AttributedStyle fill) {
+        int units = ratio > 0 ? Math.max(1, (int) Math.round(ratio * barWidth * 8)) : 0;
+        int full = units / 8;
+        int partial = units % 8;
+        context.append("█".repeat(full), fill);
+        if (partial > 0) {
+            context.append(PARTIAL_BLOCKS.substring(partial - 1, partial), fill);
+        }
+        context.append("░".repeat(barWidth - full - (partial > 0 ? 1 : 0)), TRACK_STYLE);
+    }
+
     private static AttributedString formatDetailsLine(StatusInfo info, int cols) {
-        String mcp = info.mcpSummary() == null ? "" : info.mcpSummary();
-        String skills = formatSkills(info.skillSummary());
-        int environmentWidth = fieldWidth(mcp) + fieldWidth(skills);
-        int directoryRoom = Math.max(Math.min(cols, 16), cols - environmentWidth);
-        AttributedStringBuilder line = new AttributedStringBuilder();
-        appendField(line, shorten(compactCwd(), directoryRoom, true), BASE_STYLE, cols);
-        appendField(line, mcp, BASE_STYLE, cols);
-        appendField(line, skills, BASE_STYLE, cols);
+        List<AttributedString> fields = new ArrayList<>();
+        int remaining = addDetail(fields, info.mcpSummary(), CYAN_STYLE, cols);
+        remaining = addDetail(fields, formatSkills(info.skillSummary()), SKILL_STYLE, remaining);
         if (info.inputTokens() > 0 || info.outputTokens() > 0 || info.cachedInputTokens() > 0) {
             String usage = "in " + formatTokens(info.inputTokens()) + " / out " + formatTokens(info.outputTokens());
-            appendField(line, usage, BASE_STYLE, cols);
-            if (info.cachedInputTokens() > 0) {
-                appendField(line, "cache " + formatTokens(info.cachedInputTokens()), BASE_STYLE, cols);
-            }
-            if (info.estimatedCost() != null) {
-                appendField(line, info.estimatedCost().trim(), BASE_STYLE, cols);
-            }
+            String cache = info.cachedInputTokens() > 0 ? " / cache " + formatTokens(info.cachedInputTokens()) : "";
+            remaining = addDetail(fields, width(usage + cache) + (fields.isEmpty() ? 0 : GAP.length()) <= remaining
+                    ? usage + cache : usage, USAGE_STYLE, remaining);
+            remaining = addDetail(fields, info.estimatedCost(), COST_STYLE, remaining);
         }
         if (info.elapsedMillis() > 0) {
-            appendField(line, formatElapsed(info.elapsedMillis()), BASE_STYLE, cols);
+            remaining = addDetail(fields, formatElapsed(info.elapsedMillis()), SECONDARY_STYLE, remaining);
+        }
+
+        AttributedStringBuilder line = new AttributedStringBuilder();
+        int gaps = Math.max(1, fields.size() - 1);
+        for (int i = 0; i < fields.size(); i++) {
+            if (i > 0) {
+                line.append(" ".repeat(GAP.length() + remaining / gaps + (i <= remaining % gaps ? 1 : 0)));
+            }
+            line.append(fields.get(i));
         }
         return fitToColumns(line.toAttributedString(), cols);
+    }
+
+    private static int addDetail(List<AttributedString> fields, String value, AttributedStyle color, int remaining) {
+        if (value == null || value.isBlank()) {
+            return remaining;
+        }
+        AttributedString field = new AttributedString(value.trim(), color);
+        int used = field.columnLength() + (fields.isEmpty() ? 0 : GAP.length());
+        if (used <= remaining) {
+            fields.add(field);
+            return remaining - used;
+        }
+        return remaining;
     }
 
     private static String formatSkills(String raw) {
@@ -212,7 +285,7 @@ public final class BottomStatusBar implements AutoCloseable {
     }
 
     private static int fieldWidth(String value) {
-        return value.isEmpty() ? 0 : SEPARATOR.length() + new AttributedString(value).columnLength();
+        return value.isEmpty() ? 0 : GAP.length() + width(value);
     }
 
     private static void appendField(AttributedStringBuilder line, String value, AttributedStyle style, int cols) {
@@ -220,14 +293,18 @@ public final class BottomStatusBar implements AutoCloseable {
     }
 
     private static void appendField(AttributedStringBuilder line, AttributedString value, int cols) {
-        int separatorWidth = line.length() == 0 ? 0 : SEPARATOR.length();
+        int separatorWidth = line.length() == 0 ? 0 : GAP.length();
         if (value.length() == 0 || line.columnLength() + separatorWidth + value.columnLength() > cols) {
             return;
         }
         if (separatorWidth > 0) {
-            line.append(SEPARATOR, BASE_STYLE);
+            line.append(GAP);
         }
         line.append(value);
+    }
+
+    private static int width(String value) {
+        return new AttributedString(value).columnLength();
     }
 
     private static String shorten(String value, int width, boolean keepEnd) {
@@ -250,7 +327,11 @@ public final class BottomStatusBar implements AutoCloseable {
         if (percent >= 70) {
             return WARNING_STYLE;
         }
-        return EMPHASIS_STYLE;
+        return style(CYAN_STYLE.bold());
+    }
+
+    private static AttributedStyle palette(int index) {
+        return style(AttributedStyle.DEFAULT.foreground(index));
     }
 
     private static AttributedStyle style(AttributedStyle style) {
@@ -280,12 +361,18 @@ public final class BottomStatusBar implements AutoCloseable {
         if (cwd == null || cwd.isBlank()) {
             return "";
         }
-        String normalized = Path.of(cwd).toAbsolutePath().normalize().toString();
+        Path normalized = Path.of(cwd).toAbsolutePath().normalize();
         String home = System.getProperty("user.home");
-        if (home != null && !home.isBlank() && normalized.startsWith(home)) {
-            normalized = "~" + normalized.substring(home.length());
+        if (home != null && !home.isBlank()) {
+            Path homePath = Path.of(home).toAbsolutePath().normalize();
+            if (normalized.equals(homePath)) {
+                return "~";
+            }
+            if (normalized.startsWith(homePath)) {
+                return "~" + normalized.getFileSystem().getSeparator() + homePath.relativize(normalized);
+            }
         }
-        return normalized;
+        return normalized.toString();
     }
 
     private static String formatTokens(long t) {

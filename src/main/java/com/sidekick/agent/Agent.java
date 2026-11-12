@@ -40,6 +40,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
@@ -170,6 +171,7 @@ public class Agent {
             // 调 LLM 前评估 conversationHistory 是否接近 window 上限；超阈值就把早期消息压缩成摘要。
             // 这是与第 3 期 Memory 短期记忆压缩并行的另一道压缩——后者只压 shortTermMemory，
             // 真正决定下一轮 LLM input token 的是这里。
+            long iterationStartNanos = System.nanoTime();
             injectPendingLspDiagnostics();
             maybeCompactHistory();
             AgentBudget.ExitReason exitReason = budget.check();
@@ -204,11 +206,13 @@ public class Agent {
                 streamRenderer.beginThinking();
                 // 调用 LLM
                 requestPrompt.recordRecalls();
-                LlmClient.ChatResponse response = llmClient.chat(
-                        prepared.messages(),
-                        toolDefinitions,
-                        streamRenderer
-                );
+                LlmClient.ChatResponse response;
+                streamRenderer.startRequestTiming();
+                try {
+                    response = llmClient.chat(prepared.messages(), toolDefinitions, streamRenderer);
+                } finally {
+                    streamRenderer.logRequestTiming(iteration, iterationStartNanos);
+                }
                 LlmTraceLogger.logReasoning(log, "react iteration=" + iteration, llmClient, response.reasoningContent());
                 if (CancellationContext.isCancelled()) {
                     log.info("ReAct run cancelled after LLM response");
@@ -861,6 +865,10 @@ public class Agent {
         private boolean contentStarted;
         private boolean thinkingQuotePrinted;
         private boolean streamedOutput;
+        private long requestStartNanos;
+        private long firstReasoningMs = -1;
+        private long firstAnswerMs = -1;
+        private boolean timingRequest;
 
         StreamRenderer() {
             this.renderer = null;
@@ -889,6 +897,21 @@ public class Agent {
             return renderer == null || renderer.rendersReasoning();
         }
 
+        private void startRequestTiming() {
+            requestStartNanos = System.nanoTime();
+            firstReasoningMs = -1;
+            firstAnswerMs = -1;
+            timingRequest = true;
+        }
+
+        private void logRequestTiming(int iteration, long iterationStartNanos) {
+            long modelCallMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - requestStartNanos);
+            timingRequest = false;
+            log.info("ReAct LLM timing [iteration={}]: prepareMs={}, firstReasoningMs={}, firstAnswerMs={}, modelCallMs={}",
+                    iteration, TimeUnit.NANOSECONDS.toMillis(requestStartNanos - iterationStartNanos),
+                    firstReasoningMs, firstAnswerMs, modelCallMs);
+        }
+
         private void beginThinking() {
             if (hasThinkingPanel()) {
                 renderer.beginThinking("Thinking");
@@ -906,6 +929,9 @@ public class Agent {
         public void onReasoningDelta(String delta) {
             if (delta == null || delta.isEmpty()) {
                 return;
+            }
+            if (timingRequest && firstReasoningMs < 0 && !delta.isBlank()) {
+                firstReasoningMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - requestStartNanos);
             }
             if (!rendersReasoning()) {
                 return;
@@ -954,6 +980,9 @@ public class Agent {
         public void onContentDelta(String delta) {
             if (delta == null || delta.isEmpty()) {
                 return;
+            }
+            if (timingRequest && firstAnswerMs < 0 && !delta.isBlank()) {
+                firstAnswerMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - requestStartNanos);
             }
             if (!contentStarted) {
                 if (hasThinkingPanel()) {

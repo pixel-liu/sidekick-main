@@ -438,7 +438,7 @@ public class Main {
 
         try (Terminal terminal = TerminalBuilder.builder().system(true).dumb(true).build()) {
             refreshTerminalColumns(terminal);
-            TerminalHitlHandler terminalHitlHandler = new TerminalHitlHandler(false);
+            TerminalHitlHandler terminalHitlHandler = new TerminalHitlHandler(true);
             SwitchableHitlHandler hitlHandler = new SwitchableHitlHandler(terminalHitlHandler);
             HitlToolRegistry hitlToolRegistry = new HitlToolRegistry(hitlHandler);
             BrowserSession browserSession = new BrowserSession();
@@ -526,6 +526,7 @@ public class Main {
             hitlToolRegistry.setSkillContextBuffer(skillContextBuffer);
 
             Agent reactAgent = new Agent(llmClient, hitlToolRegistry);
+            reactAgent.setHitlEnabledSupplier(hitlHandler::isEnabled);
             reactAgent.setExternalContextSupplier(mcpServerManager::resourceIndexForPrompt);
             reactAgent.setSkillRegistry(skillRegistry);
             reactAgent.setSkillContextBuffer(skillContextBuffer);
@@ -557,7 +558,6 @@ public class Main {
             }
 
             reactAgent.setRenderer(renderer);
-            reactAgent.setHitlEnabledSupplier(hitlHandler::isEnabled);
             reactAgent.getToolRegistry().setWriteFileObserver(
                     (path, ba) -> renderer.appendDiff(path, ba[0], ba[1]));
 
@@ -1505,10 +1505,6 @@ public class Main {
                 new SlashCommandHint("/browser status", "/browser status", "查看浏览器会话状态"),
                 new SlashCommandHint("/browser tabs", "/browser tabs", "查看 shared 模式真实浏览器 tab"),
                 new SlashCommandHint("/browser disconnect", "/browser disconnect", "切回 isolated 浏览器模式"),
-                new SlashCommandHint("/wechat", "/wechat", "扫码绑定并启动微信 iLink 通道"),
-                new SlashCommandHint("/wechat setup", "/wechat setup", "重新扫码绑定并启动微信通道"),
-                new SlashCommandHint("/wechat status", "/wechat status", "查看微信通道状态"),
-                new SlashCommandHint("/wechat stop", "/wechat stop", "停止当前进程内微信通道"),
                 new SlashCommandHint("/task", "/task", "查看后台任务列表"),
                 new SlashCommandHint("/task add ", "/task add <任务内容>", "提交后台任务"),
                 new SlashCommandHint("/task cancel ", "/task cancel <task_id>", "取消后台任务"),

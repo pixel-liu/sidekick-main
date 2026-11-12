@@ -10,7 +10,7 @@ Read SideKick.md for the shared architecture and development commands.
 ## Inline terminal input
 
 - Keep chat-frame decoration and the empty-input hint in JLine's display. All three task modes share the line editor. Esc clears a draft or cancels an armed Plan/Team mode when the input is empty.
-- Keep `ctx` with the model and approval mode in the first status row. Show recent request `in/out/cache` with the environment and directory on the second row.
+- Show model and `ctx` (percentage and progress bar) on the first status row with the directory aligned right. Only show the approval badge when HITL is enabled, the default for new interactive sessions. Distribute the environment and recent request `in/out/cache`, cost, and elapsed time on the second row.
 - Validate interactive input and the status layout with `mvn test -Pphase16-smoke`.
 
 ## Built-in skills
