@@ -237,7 +237,7 @@ final class InlineActivityDisplay implements AutoCloseable {
             return lines;
         }
         String suffix = showCancelHint
-                ? " (esc to cancel, " + elapsedSeconds() + "s)"
+                ? " (Esc/Ctrl+C to cancel, " + elapsedSeconds() + "s)"
                 : " (" + elapsedSeconds() + "s)";
         lines.add(fit("  " + spinner() + " " + label + "..." + suffix, cols, THINKING_TITLE_STYLE));
 

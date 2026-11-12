@@ -340,8 +340,8 @@ class MainInputNormalizationTest {
     }
 
     @Test
-    void readEscCancelHandlesNullTerminalSafely() {
-        assertFalse(Main.readEscCancel(null));
+    void readTaskKeyHandlesNullTerminalSafely() {
+        assertEquals(Main.TaskKey.NONE, Main.readTaskKey(null));
     }
 
     private static void restoreProperty(String key, String value) {

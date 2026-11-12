@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.sidekick.runtime.CancellationContext;
+import com.sidekick.runtime.CancellationToken;
 import okhttp3.*;
 import okio.BufferedSource;
 
@@ -71,7 +73,10 @@ public abstract class AbstractOpenAiCompatibleClient implements LlmClient {
         customizeRequest(request);
         Request builtRequest = request.build();
 
-        try (Response response = httpClient().newCall(builtRequest).execute()) {
+        Call call = httpClient().newCall(builtRequest);
+        CancellationToken token = CancellationContext.currentRun();
+        try (CancellationToken.Registration registration = token == null ? null : token.onCancel(call::cancel);
+             Response response = call.execute()) {
             ResponseBody responseBodyObj = response.body();
             if (!response.isSuccessful()) {
                 String errorBody = responseBodyObj != null ? responseBodyObj.string() : "无响应体";

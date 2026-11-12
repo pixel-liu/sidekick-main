@@ -30,10 +30,10 @@ class BottomStatusBarTest {
         String session = lines.get(0).toString();
         String directory = Path.of(System.getProperty("user.dir")).getFileName().toString();
         assertTrue(session.startsWith("HITL  glm-5.1  ctx 1%  ▏░░░░░░░  (1.2k/200.0k)  running"), session);
-        assertTrue(session.endsWith(directory), session);
+        assertTrue(session.endsWith(directory + " "), session);
         String details = lines.get(1).toString();
-        assertEquals("MCP 0/1|1 skill|in 1.0k / out 234 / cache 100|¥0.0123|1.5s",
-                details.replaceAll(" {2,}", "|"));
+        assertEquals("in 1.0k|out 234|cache 100|¥0.0123|1.5s|MCP 0/1|1 skill",
+                details.stripTrailing().replaceAll(" {2,}", "|"));
         int[] gaps = Pattern.compile(" {2,}").matcher(details).results()
                 .mapToInt(gap -> gap.end() - gap.start()).sorted().toArray();
         assertTrue(gaps[gaps.length - 1] - gaps[0] <= 1, details);
@@ -48,7 +48,9 @@ class BottomStatusBarTest {
         assertTrue(lines.get(0).toString().contains("1.2k/200.0k"));
         assertFalse(lines.get(0).toString().contains("53.0k/200.0k"));
         assertFalse(lines.get(0).toString().contains("idle"));
-        assertTrue(lines.get(1).toString().contains("in 51.0k / out 2.0k"));
+        assertTrue(lines.get(1).toString().contains("in 51.0k"));
+        assertTrue(lines.get(1).toString().contains("out 2.0k"));
+        assertTrue(lines.get(1).toString().contains("cache 0"));
     }
 
     @Test
@@ -67,7 +69,8 @@ class BottomStatusBarTest {
         String directory = Path.of(System.getProperty("user.dir")).getFileName().toString();
         String tail = directory.substring(directory.offsetByCodePoints(directory.length(),
                 -Math.min(5, directory.codePointCount(0, directory.length()))));
-        assertTrue(midWidth.endsWith(tail), midWidth);
+        assertTrue(midWidth.endsWith(tail + " "), midWidth);
+        assertTrue(lines.get(1).toString().matches("in — +out — +cache — +"));
     }
 
     @Test
@@ -92,16 +95,39 @@ class BottomStatusBarTest {
                 .withEnvironment("MCP 5/5", "Skill 3/5");
         var lines = BottomStatusBar.formatStatusLines(info, 140);
         assertEquals(2, lines.size());
-        AttributedStyle white = AttributedStyle.DEFAULT.foreground(AttributedStyle.BRIGHT | AttributedStyle.WHITE);
         AttributedStyle red = AttributedStyle.DEFAULT.foreground(AttributedStyle.BRIGHT | AttributedStyle.RED);
         assertFalse(lines.get(0).toString().contains("YOLO"));
         assertFalse(lines.get(0).toString().contains("HITL"));
-        assertSegmentStyle(lines.get(0), "deepseek-v4-pro", white.bold());
-        assertSegmentStyle(lines.get(0), "95%", red.bold());
+        assertSegmentStyle(lines.get(0), "deepseek-v4-pro", AttributedStyle.DEFAULT.foreground(147).bold());
+        assertSegmentStyle(lines.get(0), "ctx 95%", red.bold());
         assertSegmentStyle(lines.get(0), "███████▋", red.bold());
-        assertSegmentStyle(lines.get(1), "MCP 5/5", AttributedStyle.DEFAULT.foreground(117));
+        assertSegmentStyle(lines.get(1), "MCP 5/5", AttributedStyle.DEFAULT.foreground(81));
         assertSegmentStyle(lines.get(1), "3/5 skills", AttributedStyle.DEFAULT.foreground(183));
-        assertSegmentStyle(lines.get(1), "in 16.1k / out 437 / cache 14.3k", AttributedStyle.DEFAULT.foreground(156));
+        assertSegmentStyle(lines.get(1), "in 16.1k", AttributedStyle.DEFAULT.foreground(153));
+        assertSegmentStyle(lines.get(1), "out 437", AttributedStyle.DEFAULT.foreground(156));
+        assertSegmentStyle(lines.get(1), "cache 14.3k", AttributedStyle.DEFAULT.foreground(213));
+    }
+
+    @Test
+    void environmentRefreshRetainsUsageUntilNextMeasuredRequest() {
+        BottomStatusBar bar = new BottomStatusBar(Mockito.mock(Terminal.class));
+        bar.update(StatusInfo.tokens("model", 200_000L, 1200L, 1000L, 234L, 100L, "¥0.0123",
+                true, 1500L, "idle"));
+        bar.update(StatusInfo.idle("model", 200_000L, 2300L, false).withEnvironment("MCP 0/1", "Skill 4/4"));
+
+        StatusInfo refreshed = bar.currentStatus();
+        assertEquals(2300L, refreshed.totalTokens());
+        assertEquals(100L, refreshed.cachedInputTokens());
+        assertEquals("¥0.0123", refreshed.estimatedCost());
+        assertEquals("MCP 0/1", refreshed.mcpSummary());
+        assertFalse(refreshed.hitlEnabled());
+
+        bar.update(StatusInfo.tokens("model", 200_000L, 2500L, 2345L, 501L, 0L, "¥0.0200",
+                false, 2000L, "idle"));
+        String narrow = detailsLine(bar.currentStatus(), 32);
+        assertTrue(narrow.contains("in 2.3k"), narrow);
+        assertTrue(narrow.contains("out 501"), narrow);
+        assertTrue(narrow.contains("cache 0"), narrow);
     }
 
     @Test

@@ -82,6 +82,16 @@ public record StatusInfo(
         );
     }
 
+    public boolean hasTokenUsage() {
+        return inputTokens > 0 || outputTokens > 0 || cachedInputTokens > 0;
+    }
+
+    public StatusInfo withRequestUsage(StatusInfo request) {
+        return new StatusInfo(model, totalTokens, contextWindow,
+                request.inputTokens(), request.outputTokens(), request.cachedInputTokens(), request.estimatedCost(),
+                hitlEnabled, request.elapsedMillis(), phase, mcpSummary, skillSummary);
+    }
+
     public StatusInfo withEnvironment(String mcpSummary, String skillSummary) {
         return new StatusInfo(
                 model,

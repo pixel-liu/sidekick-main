@@ -16,8 +16,13 @@ public final class CancellationContext {
         return token;
     }
 
+    /** Token for work launched by this run. Unrelated background requests have no token. */
+    public static CancellationToken currentRun() {
+        return LOCAL.get();
+    }
+
     public static CancellationToken current() {
-        CancellationToken token = LOCAL.get();
+        CancellationToken token = currentRun();
         return token == null ? CURRENT.get() : token;
     }
 
