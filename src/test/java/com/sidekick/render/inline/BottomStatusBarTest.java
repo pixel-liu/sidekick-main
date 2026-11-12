@@ -4,12 +4,15 @@ import com.sidekick.render.StatusInfo;
 import com.sidekick.util.AnsiStyle;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
+import org.jline.terminal.TerminalBuilder;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStyle;
+import org.jline.utils.Status;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -159,16 +162,30 @@ class BottomStatusBarTest {
     }
 
     @Test
-    void closeIsSafeAfterStart() {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getSize()).thenReturn(new Size(80, 24));
+    void closeErasesReservedRowsAndRestoresFullScrolling() throws Exception {
         ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        BottomStatusBar bar = new BottomStatusBar(terminal,
-                new PrintStream(sink, true, StandardCharsets.UTF_8));
-        bar.start();
-        bar.close();
-        // 不应抛异常；mock terminal 不创建真实 JLine Status。
-        assertTrue(true);
+        try (Terminal terminal = TerminalBuilder.builder().system(false).type("xterm-256color")
+                .streams(InputStream.nullInputStream(), sink).build()) {
+            terminal.setSize(new Size(80, 24));
+            BottomStatusBar bar = new BottomStatusBar(terminal);
+            bar.start();
+            bar.update(StatusInfo.idle("glm-5.1", 200_000L, false));
+            assertEquals(2, Status.getStatus(terminal).size());
+            assertTrue(sink.toString(StandardCharsets.UTF_8).contains(AnsiSeq.setScrollRegion(1, 22)));
+
+            sink.reset();
+            bar.close();
+            assertEquals(0, Status.getStatus(terminal).size());
+            String teardown = sink.toString(StandardCharsets.UTF_8);
+            assertTrue(teardown.contains(AnsiSeq.setScrollRegion(1, 24)), teardown);
+            assertTrue(teardown.contains(AnsiSeq.moveCursor(23, 1) + AnsiSeq.CLEAR_TO_EOL), teardown);
+            assertFalse(teardown.contains(AnsiSeq.CLEAR_TO_EOS), teardown);
+
+            bar.flushNow();
+            bar.update(StatusInfo.idle("next-model", 200_000L, true));
+            bar.close();
+            assertEquals(teardown, sink.toString(StandardCharsets.UTF_8));
+        }
     }
 
     @Test

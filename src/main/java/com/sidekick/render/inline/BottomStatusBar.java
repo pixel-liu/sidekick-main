@@ -53,8 +53,8 @@ public final class BottomStatusBar implements AutoCloseable {
     private final PrintStream out;
     private volatile StatusInfo current;
     private Status status;
-    private volatile boolean started;
-    private volatile boolean closed;
+    private boolean started;
+    private boolean closed;
     private boolean inputPositioned;
 
     public BottomStatusBar(Terminal terminal) {
@@ -69,18 +69,25 @@ public final class BottomStatusBar implements AutoCloseable {
     }
 
     /** 初始化状态栏。重复调用无副作用。 */
-    public synchronized void start() {
-        if (started || closed) {
-            return;
+    public void start() {
+        synchronized (out) {
+            if (started || closed) {
+                return;
+            }
+            status = Status.getStatus(terminal);
+            started = true;
+            renderDock();
         }
-        status = Status.getStatus(terminal);
-        started = true;
-        renderDock();
     }
 
     public void update(StatusInfo info) {
-        this.current = mergeStatus(info, current);
-        renderDock();
+        synchronized (out) {
+            if (closed) {
+                return;
+            }
+            current = mergeStatus(info, current);
+            renderDock();
+        }
     }
 
     /** 当前 StatusInfo 快照，供 thinking 面板等组件复用同一份格式化结果。 */
@@ -90,52 +97,57 @@ public final class BottomStatusBar implements AutoCloseable {
 
     /** 立即触发一次重绘（不等节流间隔）。 */
     public void flushNow() {
-        renderDock();
+        synchronized (out) {
+            renderDock();
+        }
     }
 
     /** 首次编辑从状态栏上方开始，后续编辑跟随对话输出的位置。 */
     public void prepareInputLine(int inputRows) {
-        renderDock();
-        Status dock = status;
-        if (dock == null || closed || dock.size() == 0 || inputPositioned) {
-            return;
-        }
-        int rows = TerminalCapabilities.safeSize(terminal).getRows();
-        int inputRow = Math.max(0, rows - dock.size() - inputRows);
         synchronized (out) {
+            renderDock();
+            if (closed || status == null || status.size() == 0 || inputPositioned) {
+                return;
+            }
+            int rows = TerminalCapabilities.safeSize(terminal).getRows();
+            int inputRow = Math.max(0, rows - status.size() - inputRows);
             terminal.puts(InfoCmp.Capability.cursor_address, inputRow, 0);
             terminal.flush();
+            inputPositioned = true;
         }
-        inputPositioned = true;
     }
 
     /** 输入提交后保留底部 dock；正文继续在 JLine 保留区上方滚动。 */
     public void finishInputLine() {
-        renderDock();
+        flushNow();
     }
 
+    /** 调用方持有 out 锁，保证关闭后不会再画出状态栏。 */
     private void renderDock() {
-        StatusInfo info = current;
-        Status dock = status;
-        if (info == null || dock == null || closed || !started) {
+        if (current == null || status == null || closed) {
             return;
         }
         int cols = TerminalCapabilities.safeSize(terminal).getColumns();
-        synchronized (out) {
-            dock.update(formatStatusLines(info, cols));
-        }
+        status.update(formatStatusLines(current, cols));
     }
 
     @Override
-    public synchronized void close() {
-        if (closed) {
-            return;
-        }
-        closed = true;
-        Status dock = status;
-        status = null;
-        if (dock != null) {
-            dock.close();
+    public void close() {
+        synchronized (out) {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            Status dock = status;
+            status = null;
+            if (dock != null) {
+                try {
+                    // JLine close() restores the scroll region but leaves the drawn rows on screen.
+                    dock.hide();
+                } finally {
+                    dock.close();
+                }
+            }
         }
     }
 
