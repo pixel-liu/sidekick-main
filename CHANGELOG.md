@@ -2,6 +2,25 @@
 
 按日期倒序记录项目变更、验证结果和待处理问题。
 
+## 2026-11-12 — 终端聊天输入框与底栏排版
+
+### 已完成
+
+- 默认 inline 界面使用带上下分隔线的 `❯` 输入框。空输入时显示灰色示例，输入后隐藏。边线跟随多行内容重绘，移除了右侧的 `message / @path / @image`。
+- ReAct、Plan 和 Team 共用 JLine 输入流程。Esc 清除草稿，空输入时可取消待执行的 Plan 或 Team。Windows 的 CRLF 粘贴按单个换行处理。
+- 底栏第一行显示审批模式、模型、上下文用量和活动阶段。第二行显示目录、MCP、技能和最近任务的 token、费用、耗时。窄窗口优先保留审批模式和上下文百分比。移除了空闲标签、字符进度条和未绑定的 `Ctrl+Y` 提示。
+
+### 验证结果
+
+- `mvn package -Pphase16-smoke` 通过，99 项测试通过并生成可执行 JAR 和发行包。验证覆盖多行粘贴、历史回填、Esc 取消、中文列宽和状态样式。
+- `NO_COLOR=1` 下运行 `MainInputNormalizationTest`、`BottomStatusBarTest` 和 `InlineRendererTest`，52 项测试通过。
+- 通过 Windows ConPTY 检查启动、输入、清空、Plan 和 Team 取消、从 110 列缩到 56 列时的草稿和底栏、Tab 补全及 `/exit` 回显。
+- `git diff --check` 通过。
+
+### 遗留与边界
+
+- 用户截图中的 Windows Terminal 壁纸和透明主题需要在对应配置下查看。终端宽度不足时，底栏按可用空间收起附加字段。
+
 ## 2026-11-10 — 固定需求与技术方案原文
 
 ### 已完成

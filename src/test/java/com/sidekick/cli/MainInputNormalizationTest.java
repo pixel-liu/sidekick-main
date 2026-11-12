@@ -2,12 +2,14 @@ package com.sidekick.cli;
 
 import com.sidekick.llm.LlmClient;
 import com.sidekick.util.AnsiStyle;
-import org.jline.reader.History;
+import com.sidekick.render.inline.InlineRenderer;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
 import org.jline.reader.impl.history.DefaultHistory;
+import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
+import org.jline.terminal.impl.LineDisciplineTerminal;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
@@ -26,21 +28,21 @@ class MainInputNormalizationTest {
 
     @Test
     void keepsMultilinePasteStructure() {
-        String normalized = Main.prepareSeedBuffer("请把任务拆成可并行的 DAG:\n1. 读 pom.xml\r\n2. 列出 src/main/java");
+        String normalized = Main.normalizeLineEndings("请把任务拆成可并行的 DAG:\n1. 读 pom.xml\r\n2. 列出 src/main/java");
 
         assertEquals("请把任务拆成可并行的 DAG:\n1. 读 pom.xml\n2. 列出 src/main/java", normalized);
     }
 
     @Test
     void keepsSingleLineInputUntouched() {
-        String normalized = Main.prepareSeedBuffer("帮我读取 pom.xml");
+        String normalized = Main.normalizeLineEndings("帮我读取 pom.xml");
 
         assertEquals("帮我读取 pom.xml", normalized);
     }
 
     @Test
     void normalizesLegacyCarriageReturnsWithoutChangingTextLayout() {
-        String normalized = Main.prepareSeedBuffer("第一行\r第二行\r\n第三行");
+        String normalized = Main.normalizeLineEndings("第一行\r第二行\r\n第三行");
 
         assertEquals("第一行\n第二行\n第三行", normalized);
     }
@@ -82,12 +84,6 @@ class MainInputNormalizationTest {
         assertTrue(tips.containsKey("/model"));
         assertTrue(tips.get("/model").getMainDesc().get(0).toString().contains("查看当前模型"));
         assertTrue(tips.containsKey("/plan <任务内容>"));
-    }
-
-    @Test
-    void promptDoesNotUseBottomSpaciousModeByDefault() {
-        assertFalse(Main.defaultSpaciousPrompt(false));
-        assertFalse(Main.defaultSpaciousPrompt(true));
     }
 
     @Test
@@ -272,21 +268,43 @@ class MainInputNormalizationTest {
     }
 
     @Test
-    void upArrowPrefillsLatestHistoryEntry() throws Exception {
-        LineReader lineReader = newLineReader();
-        History history = lineReader.getHistory();
-        history.add("第一条");
-        history.add("最近一条");
+    void chatPromptKeepsPendingModeCancellationAndRealInputSeparate() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (LineDisciplineTerminal terminal = new LineDisciplineTerminal("test", "xterm-256color", output,
+                     StandardCharsets.UTF_8);
+             InlineRenderer renderer = new InlineRenderer(terminal)) {
+            terminal.setSize(new Size(80, 24));
+            LineReader reader = renderer.createLineReader();
+            reader.option(LineReader.Option.BRACKETED_PASTE, true);
+            Main.configureJLineInteractiveWidgets(reader);
+            Main.bindEscToClearInput(reader);
 
-        assertEquals("最近一条", Main.seedBufferForHistoryNavigation(lineReader, "[A"));
+            assertEquals(Main.PromptInput.canceledInput(), readChatInput(renderer, reader, terminal, true, "\u001b"));
+            String emptyFrame = output.toString(StandardCharsets.UTF_8);
+            assertTrue(emptyFrame.contains("试试「解释 @pom.xml」"), emptyFrame);
+            assertFalse(emptyFrame.contains("message / @path / @image"), emptyFrame);
+            assertEquals(0, reader.getHistory().size());
+
+            String text = "第一行\n第二行";
+            String paste = "\u001b[200~第一行\r\n第二行\u001b[201~\r";
+            assertEquals(Main.PromptInput.submitted(text), readChatInput(renderer, reader, terminal, true, paste));
+            assertEquals(text, reader.getHistory().get(reader.getHistory().last()));
+            assertEquals(Main.PromptInput.submitted(text), readChatInput(renderer, reader, terminal, true, "\u001b[A\r"));
+            assertEquals(Main.PromptInput.submitted(""), readChatInput(renderer, reader, terminal, false, "\r"));
+        }
     }
 
-    @Test
-    void downArrowKeepsPromptEmpty() throws Exception {
-        LineReader lineReader = newLineReader();
-        lineReader.getHistory().add("最近一条");
-
-        assertEquals("", Main.seedBufferForHistoryNavigation(lineReader, "[B"));
+    private static Main.PromptInput readChatInput(InlineRenderer renderer, LineReader reader,
+                                                  LineDisciplineTerminal terminal, boolean pending, String keys) {
+        reader.getWidgets().put(LineReader.CALLBACK_INIT, () -> {
+            try {
+                terminal.processInputBytes(keys.getBytes(StandardCharsets.UTF_8));
+            } catch (java.io.IOException e) {
+                throw new java.io.UncheckedIOException(e);
+            }
+            return true;
+        });
+        return Main.readPromptInput(reader, renderer, pending);
     }
 
     @Test

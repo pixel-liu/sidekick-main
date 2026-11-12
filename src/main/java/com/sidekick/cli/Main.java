@@ -22,6 +22,7 @@ import com.sidekick.memory.MemoryEntry;
 import com.sidekick.render.Renderer;
 import com.sidekick.render.RendererFactory;
 import com.sidekick.render.StatusInfo;
+import com.sidekick.render.inline.ChatLineReader;
 import com.sidekick.render.inline.InlineRenderer;
 import com.sidekick.image.ClipboardImage;
 import com.sidekick.mcp.McpServer;
@@ -52,14 +53,15 @@ import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 import org.jline.terminal.Attributes;
 import org.jline.reader.LineReader;
-import org.jline.reader.LineReaderBuilder;
+import org.jline.reader.Binding;
 import org.jline.reader.MaskingCallback;
 import org.jline.reader.EndOfFileException;
-import org.jline.reader.History;
 import org.jline.reader.UserInterruptException;
 import org.jline.reader.Reference;
+import org.jline.reader.Widget;
 import org.jline.utils.NonBlockingReader;
 import org.jline.utils.AttributedString;
+import org.jline.utils.InfoCmp;
 import org.jline.widget.AutosuggestionWidgets;
 import org.jline.widget.AutopairWidgets;
 import org.jline.console.CmdDesc;
@@ -87,6 +89,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
@@ -114,11 +117,7 @@ public class Main {
     private static final String HISTORY_FILE_SIZE_PROPERTY = "Sidekick.history.fileSize";
     private static final String DEFAULT_HISTORY_FILE_NAME = "input.history";
     private static final String BRACKETED_PASTE_BEGIN = "[200~";
-    private static final String BRACKETED_PASTE_END = "\u001b[201~";
-    private static final String ARROW_UP = "[A";
-    private static final String ARROW_DOWN = "[B";
-    private static final String APP_ARROW_UP = "OA";
-    private static final String APP_ARROW_DOWN = "OB";
+    private static final String CLEAR_INPUT_WIDGET = "Sidekick-clear-input";
     private static final Pattern SENSITIVE_FLAG_VALUE = Pattern.compile(
             "(?i)(--?(?:api[_-]?key|authorization|password|passwd|secret|token)\\s+)(\\S+)");
     private static final Pattern SENSITIVE_ASSIGNMENT = Pattern.compile(
@@ -382,27 +381,13 @@ public class Main {
         OTHER
     }
 
-    private record PromptInput(String text, boolean canceled) {
+    record PromptInput(String text, boolean canceled) {
         static PromptInput submitted(String text) {
             return new PromptInput(text, false);
         }
 
         static PromptInput canceledInput() {
             return new PromptInput("", true);
-        }
-    }
-
-    private record PrefillResult(String seedBuffer, boolean canceled, boolean submitted) {
-        static PrefillResult canceledInput() {
-            return new PrefillResult("", true, false);
-        }
-
-        static PrefillResult submittedInput() {
-            return new PrefillResult("", false, true);
-        }
-
-        static PrefillResult seed(String seedBuffer) {
-            return new PrefillResult(seedBuffer, false, false);
         }
     }
 
@@ -481,13 +466,13 @@ public class Main {
                 }
             });
 
-            LineReader lineReader = LineReaderBuilder.builder()
-                    .terminal(terminal)
-                    .history(new SidekickHistory())
-                    .completer(new SidekickCompleter(mcpServerManager::resourceCandidates,
-                            () -> skillRegistryRef.get() == null ? List.of() : skillRegistryRef.get().allSkills()))
-                    .highlighter(new SidekickHighlighter())
-                    .build();
+            Renderer renderer = RendererFactory.create(RendererFactory.resolveMode(), terminal);
+            ChatLineReader lineReader = renderer instanceof InlineRenderer inline
+                    ? inline.createLineReader() : new ChatLineReader(terminal);
+            lineReader.setHistory(new SidekickHistory());
+            lineReader.setCompleter(new SidekickCompleter(mcpServerManager::resourceCandidates,
+                    () -> skillRegistryRef.get() == null ? List.of() : skillRegistryRef.get().allSkills()));
+            lineReader.setHighlighter(new SidekickHighlighter());
             lineReader.option(LineReader.Option.BRACKETED_PASTE, true);
             lineReader.option(LineReader.Option.AUTO_LIST, true);
             lineReader.option(LineReader.Option.AUTO_MENU, true);
@@ -497,7 +482,6 @@ public class Main {
 
             // JLine-first：启动输出、命令输出、Agent 流式内容都走同一条 Renderer.stream() 通道。
             // inline 首屏要挂到 LineReader 首次初始化回调里，避免在 readLine 接管屏幕前用裸输出抢光标。
-            Renderer renderer = RendererFactory.create(RendererFactory.resolveMode(), terminal);
             RendererHitlHandler rendererHitl = new RendererHitlHandler(renderer, hitlHandler.isEnabled());
             hitlHandler.setDelegate(rendererHitl);
             if (renderer instanceof InlineRenderer inline) {
@@ -578,11 +562,9 @@ public class Main {
                     (path, ba) -> renderer.appendDiff(path, ba[0], ba[1]));
 
             // Day 3：inline 模式绑 Ctrl+O 到 BlockRegistry.toggleLast 实现折叠块展开/收起
-            boolean spaciousPrompt = false;
             if (renderer instanceof InlineRenderer inline) {
                 bindCtrlOToFoldableBlocks(lineReader, inline);
             }
-            spaciousPrompt = defaultSpaciousPrompt(spaciousPrompt);
             bindCtrlVToClipboardImage(lineReader);
             bindEscToClearInput(lineReader);
 
@@ -590,17 +572,12 @@ public class Main {
                 refreshTerminalColumns(terminal);
                 PromptInput promptInput;
                 try {
-                    promptInput = readPromptInput(terminal, lineReader, renderer,
-                            nextTaskUsePlanMode || nextTaskUseTeamMode, spaciousPrompt);
+                    promptInput = readPromptInput(lineReader, renderer, nextTaskUsePlanMode || nextTaskUseTeamMode);
                 } catch (UserInterruptException e) {
                     continue;  // Ctrl+C 跳过
                 } catch (EndOfFileException e) {
                     break;  // Ctrl+D 退出
                 }
-                if (renderer instanceof InlineRenderer inline) {
-                    inline.clearAcceptedInput(promptInput.text());
-                }
-
                 if (promptInput.canceled()) {
                     if (nextTaskUsePlanMode) {
                         nextTaskUsePlanMode = false;
@@ -1272,52 +1249,33 @@ public class Main {
         return classifyEscapeSequence(escTail) == EscapeSequenceType.STANDALONE_ESC;
     }
 
-    private static PromptInput readPromptInput(Terminal terminal,
-                                               LineReader lineReader,
-                                               Renderer renderer,
-                                               boolean allowEscCancel,
-                                               boolean spaciousPrompt)
+    static PromptInput readPromptInput(LineReader lineReader, Renderer renderer, boolean allowEscCancel)
             throws UserInterruptException, EndOfFileException {
-        if (spaciousPrompt) {
-            renderer.stream().println();
-        }
         renderer.beforeInput();
+        AtomicBoolean canceled = new AtomicBoolean();
+        Widget clearInput = lineReader.getWidgets().get(CLEAR_INPUT_WIDGET);
         try {
+            if (allowEscCancel) {
+                lineReader.getWidgets().put(CLEAR_INPUT_WIDGET, () -> {
+                    if (lineReader.getBuffer().length() > 0) {
+                        return clearInput.apply();
+                    }
+                    canceled.set(true);
+                    lineReader.callWidget(LineReader.ACCEPT_LINE);
+                    return true;
+                });
+            }
             String prompt = renderer.inputPrompt();
-            String rightPrompt = renderer.inputRightPrompt();
-            if (!allowEscCancel) {
-                return PromptInput.submitted(lineReader.readLine(prompt, rightPrompt, (MaskingCallback) null, null));
-            }
-
-            if (terminal != null && terminal.writer() != null) {
-                terminal.writer().print(prompt);
-                terminal.writer().flush();
-            } else {
-                renderer.stream().print(prompt);
-                renderer.stream().flush();
-            }
-
-            PrefillResult prefill = readPrefillInputFromTerminal(terminal, lineReader);
-            if (prefill == null) {
-                return PromptInput.submitted(lineReader.readLine("", rightPrompt, (MaskingCallback) null, null));
-            }
-
-            if (prefill.canceled()) {
-                return PromptInput.canceledInput();
-            }
-
-            if (prefill.submitted()) {
-                return PromptInput.submitted("");
-            }
-
-            return PromptInput.submitted(lineReader.readLine("", rightPrompt, (MaskingCallback) null, prefill.seedBuffer()));
+            String input = renderer instanceof InlineRenderer && lineReader instanceof ChatLineReader chat
+                    ? chat.readChatLine(prompt)
+                    : lineReader.readLine(prompt, renderer.inputRightPrompt(), (MaskingCallback) null, null);
+            return canceled.get() ? PromptInput.canceledInput() : PromptInput.submitted(normalizeLineEndings(input));
         } finally {
+            if (allowEscCancel) {
+                lineReader.getWidgets().put(CLEAR_INPUT_WIDGET, clearInput);
+            }
             renderer.afterInput();
         }
-    }
-
-    static boolean defaultSpaciousPrompt(boolean statusBarAvailable) {
-        return false;
     }
 
     static void printSubmittedPrompt(PrintStream out, String input) {
@@ -1488,67 +1446,6 @@ public class Main {
         }
     }
 
-    private static PrefillResult readPrefillInputFromTerminal(Terminal terminal, LineReader lineReader) {
-        try {
-            terminal.flush();
-            Attributes originalAttributes = terminal.enterRawMode();
-            try {
-                int key = terminal.reader().read();
-                if (key < 0) {
-                    return null;
-                }
-
-                if (key == 27) {
-                    return readEscapeInput(terminal, lineReader);
-                }
-
-                if (isSubmitKey(key)) {
-                    return PrefillResult.submittedInput();
-                }
-
-                String rawInput = switch (key) {
-                    case 8, 127 -> "";
-                    default -> Character.toString((char) key);
-                };
-
-                rawInput += readInputBurst(terminal, 20, 25, 250);
-                return PrefillResult.seed(prepareSeedBuffer(rawInput));
-            } finally {
-                terminal.setAttributes(originalAttributes);
-            }
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private static PrefillResult readEscapeInput(Terminal terminal, LineReader lineReader)
-            throws IOException, InterruptedException {
-        String sequence = readInputBurst(terminal, 80, 20, 300);
-        EscapeSequenceType escapeSequenceType = classifyEscapeSequence(sequence);
-        if (escapeSequenceType == EscapeSequenceType.STANDALONE_ESC) {
-            return PrefillResult.canceledInput();
-        }
-
-        if (escapeSequenceType == EscapeSequenceType.BRACKETED_PASTE) {
-            String pastedText = sequence.substring(BRACKETED_PASTE_BEGIN.length());
-            while (!pastedText.contains(BRACKETED_PASTE_END)) {
-                String burst = readInputBurst(terminal, 30, 25, 500);
-                if (burst.isEmpty()) {
-                    break;
-                }
-                pastedText += burst;
-            }
-
-            return PrefillResult.seed(prepareSeedBuffer(stripBracketedPasteEndMarker(pastedText)));
-        }
-
-        if (escapeSequenceType == EscapeSequenceType.CONTROL_SEQUENCE) {
-            return PrefillResult.seed(seedBufferForHistoryNavigation(lineReader, sequence));
-        }
-
-        return PrefillResult.canceledInput();
-    }
-
     private static String readInputBurst(Terminal terminal, long firstWaitMs, long idleWaitMs, long maxWaitMs)
             throws IOException, InterruptedException {
         NonBlockingReader reader = terminal.reader();
@@ -1566,13 +1463,6 @@ public class Main {
         }
 
         return buffer.toString();
-    }
-
-    static String prepareSeedBuffer(String rawInput) {
-        if (rawInput == null || rawInput.isEmpty()) {
-            return "";
-        }
-        return normalizeLineEndings(rawInput);
     }
 
     static List<String> startupHints() {
@@ -1698,9 +1588,25 @@ public class Main {
         }
         new AutosuggestionWidgets(lineReader).enable();
         new AutopairWidgets(lineReader).enable();
+        for (String name : new String[]{LineReader.MAIN, LineReader.EMACS, LineReader.VIINS}) {
+            KeyMap<Binding> keys = lineReader.getKeyMaps().get(name);
+            bindArrowAliases(lineReader.getTerminal(), keys, InfoCmp.Capability.key_up, "A");
+            bindArrowAliases(lineReader.getTerminal(), keys, InfoCmp.Capability.key_down, "B");
+        }
         // JLine TailTipWidgets 会通过 Status 预留多行底部区域；如果在首屏前 enable，
         // banner 前会出现大段空白，输入行下方也会长期空出一块。命令说明后续用
         // 不预留布局的方式展示，避免破坏 Claude Code / Qoder 风格的 inline 体验。
+    }
+
+    private static void bindArrowAliases(Terminal terminal, KeyMap<Binding> keys, InfoCmp.Capability capability,
+                                         String direction) {
+        String nativeSequence = KeyMap.key(terminal, capability);
+        if (keys != null && nativeSequence != null) {
+            Binding arrow = keys.getBound(nativeSequence);
+            if (arrow != null) {
+                keys.bind(arrow, "\u001b[" + direction, "\u001bO" + direction);
+            }
+        }
     }
 
     static LinkedHashMap<String, CmdDesc> slashCommandTailTips() {
@@ -2029,12 +1935,12 @@ public class Main {
         if (lineReader == null) {
             return;
         }
-        lineReader.getWidgets().put("Sidekick-clear-input", () -> {
+        lineReader.getWidgets().put(CLEAR_INPUT_WIDGET, () -> {
             clearInputBuffer(lineReader);
             lineReader.callWidget(LineReader.REDISPLAY);
             return true;
         });
-        Reference clearInput = new Reference("Sidekick-clear-input");
+        Reference clearInput = new Reference(CLEAR_INPUT_WIDGET);
         String esc = KeyMap.esc();
         for (String mapName : new String[]{LineReader.MAIN, LineReader.EMACS, LineReader.VIINS}) {
             KeyMap<org.jline.reader.Binding> map = lineReader.getKeyMaps().get(mapName);
@@ -2734,18 +2640,6 @@ public class Main {
                 .replace('\r', '\n');
     }
 
-    private static String stripBracketedPasteEndMarker(String rawInput) {
-        int endMarkerIndex = rawInput.indexOf(BRACKETED_PASTE_END);
-        if (endMarkerIndex >= 0) {
-            return rawInput.substring(0, endMarkerIndex);
-        }
-        return rawInput;
-    }
-
-    private static boolean isSubmitKey(int key) {
-        return key == '\n' || key == '\r';
-    }
-
     static EscapeSequenceType classifyEscapeSequence(String sequence) {
         if (sequence == null || sequence.isEmpty()) {
             return EscapeSequenceType.STANDALONE_ESC;
@@ -2757,44 +2651,6 @@ public class Main {
             return EscapeSequenceType.CONTROL_SEQUENCE;
         }
         return EscapeSequenceType.OTHER;
-    }
-
-    static String seedBufferForHistoryNavigation(LineReader lineReader, String sequence) {
-        if (lineReader == null || sequence == null || sequence.isEmpty()) {
-            return "";
-        }
-
-        if (isUpArrowSequence(sequence)) {
-            return latestHistoryEntry(lineReader.getHistory());
-        }
-
-        if (isDownArrowSequence(sequence)) {
-            return "";
-        }
-
-        return "";
-    }
-
-    private static boolean isUpArrowSequence(String sequence) {
-        return ARROW_UP.equals(sequence) || APP_ARROW_UP.equals(sequence);
-    }
-
-    private static boolean isDownArrowSequence(String sequence) {
-        return ARROW_DOWN.equals(sequence) || APP_ARROW_DOWN.equals(sequence);
-    }
-
-    private static String latestHistoryEntry(History history) {
-        if (history == null || history.isEmpty()) {
-            return "";
-        }
-
-        int lastIndex = history.last();
-        if (lastIndex < 0) {
-            return "";
-        }
-
-        String entry = history.get(lastIndex);
-        return entry == null ? "" : entry;
     }
 
     static void configureHistory(LineReader lineReader, Path homeDir) {

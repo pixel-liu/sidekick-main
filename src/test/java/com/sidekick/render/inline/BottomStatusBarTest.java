@@ -20,97 +20,71 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BottomStatusBarTest {
 
     @Test
-    void footerLineIncludesAllFields() {
+    void separatesSessionFromEnvironmentAndLastRequestUsage() {
         StatusInfo info = StatusInfo.tokens("glm-5.1", 200_000L, 1200L, 1000L, 234L, 100L, "¥0.0123",
-                true, 1500L, "running");
-        String line = footerLine(info, 200);
-        assertTrue(line.contains("Auto Model"), line);
-        assertTrue(line.contains("running"), line);
-        assertTrue(line.contains("glm-5.1"), line);
-        assertTrue(line.contains("ctx"), line);
-        assertTrue(line.contains("1%"), line);
-        assertTrue(line.contains("1.2k/200.0k"), line);
-        assertTrue(line.contains("in 1.0k out 234"), line);
-        assertTrue(line.contains("cache 100"), line);
-        assertTrue(line.contains("¥0.0123"), line);
-        assertTrue(line.contains("1.5s"), line);
+                true, 1500L, "running").withEnvironment("MCP 0/1", "Skill 1/1");
+        var lines = BottomStatusBar.formatStatusLines(info, 200);
+
+        assertEquals("HITL · glm-5.1 · ctx 1% (1.2k/200.0k) · running", lines.get(0).toString().stripTrailing());
+        String details = lines.get(1).toString();
+        assertTrue(details.contains("MCP 0/1 · 1 skill · in 1.0k / out 234 · cache 100 · ¥0.0123 · 1.5s"), details);
+        assertTrue(details.startsWith(details.stripLeading()), details);
     }
 
     @Test
     void contextSegmentUsesContextTokensNotUsageTotals() {
         StatusInfo info = StatusInfo.tokens("glm-5.1", 200_000L, 1200L, 51_000L, 2_000L, 0L,
                 null, false, 0L, "idle");
-        String line = footerLine(info, 200);
+        var lines = BottomStatusBar.formatStatusLines(info, 200);
 
-        assertTrue(line.contains("ctx"), line);
-        assertTrue(line.contains("1.2k/200.0k"), line);
-        assertTrue(line.contains("in 51.0k out 2.0k"), line);
-        assertFalse(line.contains("53.0k/200.0k"), line);
+        assertTrue(lines.get(0).toString().contains("1.2k/200.0k"));
+        assertFalse(lines.get(0).toString().contains("53.0k/200.0k"));
+        assertFalse(lines.get(0).toString().contains("idle"));
+        assertTrue(lines.get(1).toString().contains("in 51.0k / out 2.0k"));
     }
 
     @Test
-    void formatStatusLinePadsToColumnWidth() {
-        StatusInfo info = new StatusInfo("glm-5.1", 0L, 200_000L, false, 0L);
-        AttributedString line = BottomStatusBar.formatStatusLines(info, 80).get(0);
-        assertEquals(80, line.columnLength());
-    }
-
-    @Test
-    void formatStatusLineTruncatesWhenLong() {
-        StatusInfo info = StatusInfo.idle("glm-5.1", 200_000L, false)
+    void narrowStatusKeepsModeAndContextAndFitsWideCharacters() {
+        StatusInfo info = StatusInfo.idle("超长中文模型名称", 200_000L, false)
                 .withEnvironment("MCP 4/4", "Skill 2/2");
-        AttributedString line = BottomStatusBar.formatStatusLines(info, 30).get(0);
-        assertEquals(30, line.columnLength());
-        assertTrue(line.toString().startsWith("YOLO Ctrl+Y to enable HITL"));
+        var lines = BottomStatusBar.formatStatusLines(info, 22);
+        String session = lines.get(0).toString();
+        assertEquals(22, lines.get(0).columnLength());
+        assertEquals(22, lines.get(1).columnLength());
+        assertTrue(session.startsWith("YOLO · 超长"), session);
+        assertTrue(session.contains("… · ctx 0%"), session);
     }
 
     @Test
-    void footerLineHidesElapsedWhenZero() {
+    void detailsLineHidesElapsedWhenZero() {
         StatusInfo info = new StatusInfo("glm-5.1", 0L, 200_000L, false, 0L);
-        String line = footerLine(info, 80);
+        String line = detailsLine(info, 80);
         assertFalse(line.contains("ms"));
         assertFalse(line.contains("0s"));
     }
 
     @Test
-    void footerLineHandlesMillisecondElapsed() {
+    void detailsLineHandlesMillisecondElapsed() {
         StatusInfo info = new StatusInfo("glm-5.1", 0L, 0L, false, 250L);
-        String line = footerLine(info, 80);
+        String line = detailsLine(info, 80);
         assertTrue(line.contains("250ms"), line);
     }
 
     @Test
-    void footerLineFitsColumnWidth() {
-        AttributedString line = BottomStatusBar.formatStatusLines(StatusInfo.idle("测试模型", 200_000L, false), 40).get(1);
-        assertEquals(40, line.columnLength());
-        assertTrue(line.toString().startsWith("Auto Model · 测试模型"), line.toString());
-    }
-
-    @Test
-    void activeStatusLineShowsPhase() {
-        StatusInfo info = StatusInfo.active("glm-5.1", 200_000L, false, "plan")
-                .withEnvironment("MCP 4/4", "Skill 2/2");
-        String top = BottomStatusBar.formatStatusLines(info, 80).get(0).toString();
-        String bottom = footerLine(info, 80);
-        assertEquals("YOLO Ctrl+Y to enable HITL · 4 MCP servers · 2 skills", top.stripTrailing());
-        assertTrue(bottom.startsWith("Auto Model · glm-5.1  plan"), bottom);
-    }
-
-    @Test
     void statusLinesUseBrightColorsForTextAndWarnings() {
-        StatusInfo info = StatusInfo.tokens("deepseek-v4-pro", 1_000_000L, 5200L, 16_100L,
+        StatusInfo info = StatusInfo.tokens("deepseek-v4-pro", 1_000_000L, 950_000L, 16_100L,
                         437L, 14_300L, null, false, 0L, "idle")
-                .withEnvironment("MCP 5/5", "Skill 5/5");
+                .withEnvironment("MCP 5/5", "Skill 3/5");
         var lines = BottomStatusBar.formatStatusLines(info, 140);
         assertEquals(2, lines.size());
         AttributedStyle white = AttributedStyle.DEFAULT.foreground(AttributedStyle.BRIGHT | AttributedStyle.WHITE);
         AttributedStyle yellow = AttributedStyle.DEFAULT.foreground(AttributedStyle.BRIGHT | AttributedStyle.YELLOW);
+        AttributedStyle red = AttributedStyle.DEFAULT.foreground(AttributedStyle.BRIGHT | AttributedStyle.RED);
         assertSegmentStyle(lines.get(0), "YOLO", yellow.bold());
-        assertSegmentStyle(lines.get(0), "5 MCP servers · 5 skills", white);
-        assertSegmentStyle(lines.get(1), "Auto Model · ", white);
-        assertSegmentStyle(lines.get(1), "deepseek-v4-pro", white.bold());
-        assertSegmentStyle(lines.get(1), "idle  ctx ░░░░░░░░", white);
-        assertSegmentStyle(lines.get(1), "(5.2k/1.0M)  in 16.1k out 437 cache 14.3k", white);
+        assertSegmentStyle(lines.get(0), "deepseek-v4-pro", white.bold());
+        assertSegmentStyle(lines.get(0), "95%", red.bold());
+        assertSegmentStyle(lines.get(1), "MCP 5/5 · 3/5 skills", white);
+        assertSegmentStyle(lines.get(1), "in 16.1k / out 437 · cache 14.3k", white);
     }
 
     @Test
@@ -183,7 +157,7 @@ class BottomStatusBarTest {
         try {
             bar.update(StatusInfo.idle("glm-5.1", 200_000L, false));
             sink.reset();
-            bar.prepareInputLine();
+            bar.prepareInputLine(3);
             String prepared = sink.toString(StandardCharsets.UTF_8);
             assertFalse(prepared.startsWith("\n\n"), "dock must not inject spacer rows under the prompt: " + prepared);
             assertFalse(prepared.contains(AnsiSeq.moveUp(3)), prepared);
@@ -199,7 +173,7 @@ class BottomStatusBarTest {
         }
     }
 
-    private static String footerLine(StatusInfo info, int columns) {
+    private static String detailsLine(StatusInfo info, int columns) {
         return BottomStatusBar.formatStatusLines(info, columns).get(1).toString();
     }
 

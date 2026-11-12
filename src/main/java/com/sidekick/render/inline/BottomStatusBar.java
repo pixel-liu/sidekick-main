@@ -18,17 +18,12 @@ import java.util.regex.Pattern;
 /**
  * JLine 托管的底部 dock。
  *
- * <p>只通过 {@link Status} 更新底部保留区，不再手写换行、绝对光标行号或
- * {@code CLEAR_TO_EOS}。正文输出、thinking activity 和 LineReader 输入区都交给
- * JLine 共同协调，避免多个组件争抢同一块物理终端区域。
- *
- * <p>保留类名是为了让 {@link InlineRenderer} 的边界稳定：外部仍然只看
- * start/update/close，不关心底层布局实现。
+ * <p>{@link Status} 保留状态行，聊天框的边线和输入由 {@link ChatLineReader} 重绘。
  */
 public final class BottomStatusBar implements AutoCloseable {
 
-    private static final int CONTEXT_BAR_WIDTH = 8;
-    private static final Pattern SUMMARY_RATIO = Pattern.compile("(?i)^(?:MCP|Skill)\\s+(\\d+)/(\\d+)$");
+    private static final String SEPARATOR = " · ";
+    private static final Pattern SKILL_RATIO = Pattern.compile("Skill (\\d+)/(\\d+)");
     private static final AttributedStyle BASE_STYLE = style(AttributedStyle.DEFAULT
             .foreground(AttributedStyle.BRIGHT | AttributedStyle.WHITE));
     private static final AttributedStyle EMPHASIS_STYLE = style(BASE_STYLE.bold());
@@ -43,6 +38,7 @@ public final class BottomStatusBar implements AutoCloseable {
     private Status status;
     private volatile boolean started;
     private volatile boolean closed;
+    private boolean inputPositioned;
 
     public BottomStatusBar(Terminal terminal) {
         this.terminal = terminal;
@@ -61,9 +57,6 @@ public final class BottomStatusBar implements AutoCloseable {
             return;
         }
         status = Status.getStatus(terminal);
-        if (status != null) {
-            status.setBorder(true);
-        }
         started = true;
         renderDock();
     }
@@ -83,10 +76,20 @@ public final class BottomStatusBar implements AutoCloseable {
         renderDock();
     }
 
-    /** 在即将读取输入时刷新 JLine dock；光标和输入行位置由 LineReader 管理。 */
-    public void prepareInputLine() {
+    /** 首次编辑从状态栏上方开始，后续编辑跟随对话输出的位置。 */
+    public void prepareInputLine(int inputRows) {
         renderDock();
-        moveCursorToDockInputRow();
+        Status dock = status;
+        if (dock == null || closed || dock.size() == 0 || inputPositioned) {
+            return;
+        }
+        int rows = TerminalCapabilities.safeSize(terminal).getRows();
+        int inputRow = Math.max(0, rows - dock.size() - inputRows);
+        synchronized (out) {
+            terminal.puts(InfoCmp.Capability.cursor_address, inputRow, 0);
+            terminal.flush();
+        }
+        inputPositioned = true;
     }
 
     /** 输入提交后保留底部 dock；正文继续在 JLine 保留区上方滚动。 */
@@ -103,21 +106,6 @@ public final class BottomStatusBar implements AutoCloseable {
         int cols = TerminalCapabilities.safeSize(terminal).getColumns();
         synchronized (out) {
             dock.update(formatStatusLines(info, cols));
-        }
-    }
-
-    private void moveCursorToDockInputRow() {
-        StatusInfo info = current;
-        if (info == null || closed || !started) {
-            return;
-        }
-        int rows = TerminalCapabilities.safeSize(terminal).getRows();
-        int cols = TerminalCapabilities.safeSize(terminal).getColumns();
-        int dockRows = formatStatusLines(info, cols).size() + 1; // JLine Status border.
-        int inputRow = inputDockRow(rows, dockRows);
-        synchronized (out) {
-            terminal.puts(InfoCmp.Capability.cursor_address, inputRow, 0);
-            terminal.flush();
         }
     }
 
@@ -151,100 +139,108 @@ public final class BottomStatusBar implements AutoCloseable {
     }
 
     static List<AttributedString> formatStatusLines(StatusInfo info, int cols) {
-        return List.of(
-                formatStatusLineAttributed(info, cols),
-                formatFooterLineAttributed(info, cols)
-        );
+        return List.of(formatSessionLine(info, cols), formatDetailsLine(info, cols));
     }
 
-    private static AttributedString formatStatusLineAttributed(StatusInfo info, int cols) {
-        String mode = info.hitlEnabled() ? "HITL Ctrl+Y for YOLO" : "YOLO Ctrl+Y to enable HITL";
-        String environment = environmentSummary(info);
-        AttributedStringBuilder builder = new AttributedStringBuilder(Math.max(0, cols));
-        builder.append(mode, info.hitlEnabled() ? EMPHASIS_STYLE : WARNING_STYLE);
-        if (!environment.isBlank()) {
-            builder.append(" · " + environment, BASE_STYLE);
-        }
-        return fitToColumns(builder.toAttributedString(), cols);
-    }
-
-    private static AttributedString formatFooterLineAttributed(StatusInfo info, int cols) {
+    private static AttributedString formatSessionLine(StatusInfo info, int cols) {
+        String mode = info.hitlEnabled() ? "HITL" : "YOLO";
         String model = info.model() == null || info.model().isBlank() ? "Auto Model" : info.model().trim();
-        String phase = info.phase() == null || info.phase().isBlank() ? "idle" : info.phase().trim();
-        AttributedStringBuilder builder = new AttributedStringBuilder(Math.max(0, cols));
-        builder.append("Auto Model · ", BASE_STYLE);
-        builder.append(model, EMPHASIS_STYLE);
-        appendStyledField(builder, phase, "idle".equalsIgnoreCase(phase) ? BASE_STYLE : WARNING_STYLE);
-        appendContextField(builder, info);
+        String phase = info.phase() == null ? "" : info.phase().trim();
+        if ("idle".equalsIgnoreCase(phase)) {
+            phase = "";
+        }
+        long total = Math.max(0L, info.totalTokens());
+        long window = Math.max(0L, info.contextWindow());
+        int percent = window == 0L ? 0 : (int) Math.min(100L, Math.round(total * 100.0 / window));
+        String contextLabel = "ctx " + percent + "%";
+        int modelRoom = cols - mode.length() - 2 * SEPARATOR.length() - contextLabel.length();
+        AttributedStringBuilder line = new AttributedStringBuilder();
+        line.append(mode, info.hitlEnabled() ? EMPHASIS_STYLE : WARNING_STYLE);
+        appendField(line, shorten(model, modelRoom, false), EMPHASIS_STYLE, cols);
+        AttributedStringBuilder context = new AttributedStringBuilder();
+        context.append("ctx ", BASE_STYLE).append(percent + "%", contextPercentStyle(percent));
+        String contextSize = " (" + formatTokens(total) + "/" + formatTokens(window) + ")";
+        int phaseWidth = fieldWidth(phase);
+        if (line.columnLength() + SEPARATOR.length() + context.columnLength() + contextSize.length() + phaseWidth <= cols) {
+            context.append(contextSize, BASE_STYLE);
+        }
+        appendField(line, context.toAttributedString(), cols);
+        appendField(line, phase, WARNING_STYLE, cols);
+        return fitToColumns(line.toAttributedString(), cols);
+    }
+
+    private static AttributedString formatDetailsLine(StatusInfo info, int cols) {
+        String mcp = info.mcpSummary() == null ? "" : info.mcpSummary();
+        String skills = formatSkills(info.skillSummary());
+        int environmentWidth = fieldWidth(mcp) + fieldWidth(skills);
+        int directoryRoom = Math.max(Math.min(cols, 16), cols - environmentWidth);
+        AttributedStringBuilder line = new AttributedStringBuilder();
+        appendField(line, shorten(compactCwd(), directoryRoom, true), BASE_STYLE, cols);
+        appendField(line, mcp, BASE_STYLE, cols);
+        appendField(line, skills, BASE_STYLE, cols);
         if (info.inputTokens() > 0 || info.outputTokens() > 0 || info.cachedInputTokens() > 0) {
-            appendUsageField(builder, info);
-            if (info.estimatedCost() != null && !info.estimatedCost().isBlank()) {
-                builder.append(" · ", BASE_STYLE);
-                builder.append(info.estimatedCost().trim(), BASE_STYLE);
+            String usage = "in " + formatTokens(info.inputTokens()) + " / out " + formatTokens(info.outputTokens());
+            appendField(line, usage, BASE_STYLE, cols);
+            if (info.cachedInputTokens() > 0) {
+                appendField(line, "cache " + formatTokens(info.cachedInputTokens()), BASE_STYLE, cols);
+            }
+            if (info.estimatedCost() != null) {
+                appendField(line, info.estimatedCost().trim(), BASE_STYLE, cols);
             }
         }
         if (info.elapsedMillis() > 0) {
-            appendStyledField(builder, formatElapsed(info.elapsedMillis()), BASE_STYLE);
+            appendField(line, formatElapsed(info.elapsedMillis()), BASE_STYLE, cols);
         }
-        appendStyledField(builder, compactCwd(), BASE_STYLE);
-        return fitToColumns(builder.toAttributedString(), cols);
+        return fitToColumns(line.toAttributedString(), cols);
     }
 
-    static int inputDockRow(int terminalRows, int dockRows) {
-        return Math.max(0, terminalRows - Math.max(0, dockRows) - 1);
-    }
-
-    private static String environmentSummary(StatusInfo info) {
-        String mcp = formatEnvironment(info.mcpSummary(), "MCP server", "MCP servers");
-        String skill = formatEnvironment(info.skillSummary(), "skill", "skills");
-        if (mcp.isBlank()) {
-            return skill;
-        }
-        if (skill.isBlank()) {
-            return mcp;
-        }
-        return mcp + " · " + skill;
-    }
-
-    private static String formatEnvironment(String raw, String singular, String plural) {
-        if (raw == null || raw.isBlank()) {
+    private static String formatSkills(String raw) {
+        if (raw == null) {
             return "";
         }
-        String value = raw.trim();
-        Matcher matcher = SUMMARY_RATIO.matcher(value);
+        if ("Skill 0".equals(raw)) {
+            return "0 skills";
+        }
+        Matcher matcher = SKILL_RATIO.matcher(raw);
         if (!matcher.matches()) {
-            return value;
+            return raw;
         }
-        int active = Integer.parseInt(matcher.group(1));
-        int total = Integer.parseInt(matcher.group(2));
-        if (active == total) {
-            return total + " " + (total == 1 ? singular : plural);
-        }
-        return active + "/" + total + " " + plural;
+        String enabled = matcher.group(1);
+        String total = matcher.group(2);
+        return enabled.equals(total) ? enabled + ("1".equals(total) ? " skill" : " skills")
+                : enabled + "/" + total + " skills";
     }
 
-    private static void appendStyledField(AttributedStringBuilder builder, String value, AttributedStyle style) {
-        if (value == null || value.isBlank()) {
+    private static int fieldWidth(String value) {
+        return value.isEmpty() ? 0 : SEPARATOR.length() + new AttributedString(value).columnLength();
+    }
+
+    private static void appendField(AttributedStringBuilder line, String value, AttributedStyle style, int cols) {
+        appendField(line, new AttributedString(value, style), cols);
+    }
+
+    private static void appendField(AttributedStringBuilder line, AttributedString value, int cols) {
+        int separatorWidth = line.length() == 0 ? 0 : SEPARATOR.length();
+        if (value.length() == 0 || line.columnLength() + separatorWidth + value.columnLength() > cols) {
             return;
         }
-        builder.append("  ", BASE_STYLE);
-        builder.append(value.trim(), style);
-    }
-
-    private static void appendContextField(AttributedStringBuilder builder, StatusInfo info) {
-        ContextGauge gauge = contextGauge(info);
-        builder.append("  ctx " + "█".repeat(gauge.filled()) + "░".repeat(gauge.empty()), BASE_STYLE);
-        builder.append(" ", BASE_STYLE);
-        builder.append(gauge.percent() + "%", contextPercentStyle(gauge.percent()));
-        builder.append(" (" + formatTokens(gauge.total()) + "/" + formatTokens(gauge.window()) + ")", BASE_STYLE);
-    }
-
-    private static void appendUsageField(AttributedStringBuilder builder, StatusInfo info) {
-        builder.append("  in " + formatTokens(info.inputTokens()) + " out " + formatTokens(info.outputTokens()),
-                BASE_STYLE);
-        if (info.cachedInputTokens() > 0) {
-            builder.append(" cache " + formatTokens(info.cachedInputTokens()), BASE_STYLE);
+        if (separatorWidth > 0) {
+            line.append(SEPARATOR, BASE_STYLE);
         }
+        line.append(value);
+    }
+
+    private static String shorten(String value, int width, boolean keepEnd) {
+        if (width <= 0) {
+            return "";
+        }
+        AttributedString text = new AttributedString(value);
+        int length = text.columnLength();
+        if (length <= width) {
+            return value;
+        }
+        return keepEnd ? "…" + text.columnSubSequence(length - width + 1, length)
+                : text.columnSubSequence(0, width - 1) + "…";
     }
 
     private static AttributedStyle contextPercentStyle(int percent) {
@@ -277,19 +273,6 @@ public final class BottomStatusBar implements AutoCloseable {
         builder.append(safe);
         builder.append(" ".repeat(cols - length), BASE_STYLE);
         return builder.toAttributedString();
-    }
-
-    private static ContextGauge contextGauge(StatusInfo info) {
-        long total = Math.max(0L, info.totalTokens());
-        long window = Math.max(0L, info.contextWindow());
-        int percent = window <= 0L ? 0 : (int) Math.min(100L, Math.round(total * 100.0 / window));
-        int filled = window <= 0L ? 0 : (int) Math.min(CONTEXT_BAR_WIDTH,
-                Math.round(total * CONTEXT_BAR_WIDTH * 1.0 / window));
-        int empty = Math.max(0, CONTEXT_BAR_WIDTH - filled);
-        return new ContextGauge(total, window, percent, filled, empty);
-    }
-
-    private record ContextGauge(long total, long window, int percent, int filled, int empty) {
     }
 
     private static String compactCwd() {

@@ -7,6 +7,12 @@ Read SideKick.md for the shared architecture and development commands.
 - 每次迭代项目代码，都必须在 CHANGELOG.md 中记录本次变更、验证结果和遗留问题；完成相关验证后提交本次迭代的代码与文档，并推送到当前 GitHub 仓库的对应分支。
 - Git 提交信息和推送到 GitHub 的变更描述统一使用中文。
 
+## Inline terminal input
+
+- Keep chat-frame decoration and the empty-input hint in JLine's display. All three task modes share the line editor. Esc clears a draft or cancels an armed Plan/Team mode when the input is empty.
+- Keep `ctx` with the model and approval mode in the first status row. Show recent request `in/out/cache` with the environment and directory on the second row.
+- Validate interactive input and the status layout with `mvn test -Pphase16-smoke`.
+
 ## Built-in skills
 
 - Built-in skills are `web-access`, `debugging`, `code-review`, and `skill-authoring`; register new resource files in `SkillBuiltinExtractor`.

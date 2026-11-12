@@ -21,6 +21,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class InlineRendererTest {
@@ -148,8 +149,8 @@ class InlineRendererTest {
             renderer.afterInput();
 
             String emitted = sink.toString(StandardCharsets.UTF_8);
-            assertEquals("* ", renderer.inputPrompt());
-            assertTrue(renderer.inputRightPrompt().contains("@path"));
+            assertEquals("❯ ", renderer.inputPrompt());
+            assertNull(renderer.inputRightPrompt());
             assertFalse(emitted.contains("[39;1H"), "LineReader should own the input row: " + emitted);
             assertFalse(emitted.contains("[37;1H"), "renderer should not force transcript cursor rows: " + emitted);
         } finally {
