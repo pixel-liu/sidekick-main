@@ -220,7 +220,7 @@ class InlineRendererTest {
             assertTrue(rendered.contains("▱"), rendered);
             assertTrue(rendered.contains("%"), rendered);
             assertFalse(rendered.contains("正在整理早期对话"), rendered);
-            assertFalse(rendered.contains("esc to cancel"), rendered);
+            assertFalse(rendered.contains("Esc/Ctrl+C to cancel"), rendered);
         } finally {
             renderer.endActivity();
             renderer.close();

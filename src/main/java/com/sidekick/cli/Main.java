@@ -82,7 +82,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -90,6 +89,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
@@ -391,6 +391,43 @@ public class Main {
         }
     }
 
+    private static final class CtrlCExit {
+        private static final long EXIT_WINDOW_NANOS = TimeUnit.SECONDS.toNanos(2);
+        private static final String EXIT_HINT = "2 秒内再按一次 Ctrl+C 退出 SideKick。";
+        private final AtomicInteger pending = new AtomicInteger();
+        private Long firstPressNanos;
+        private boolean exitRequested;
+        private boolean taskCanceled;
+
+        void signal() {
+            pending.incrementAndGet();
+        }
+
+        boolean drain(PrintStream out, boolean taskRunning) {
+            int presses = pending.getAndSet(0);
+            for (int i = 0; i < presses && !exitRequested; i++) {
+                press(out, taskRunning);
+            }
+            return presses > 0;
+        }
+
+        void press(PrintStream out, boolean taskRunning) {
+            long now = System.nanoTime();
+            if (firstPressNanos != null && now - firstPressNanos < EXIT_WINDOW_NANOS) {
+                exitRequested = true;
+            } else {
+                firstPressNanos = now;
+                if (!taskRunning) {
+                    out.println(EXIT_HINT);
+                }
+            }
+        }
+
+        void reset() {
+            firstPressNanos = null;
+        }
+    }
+
     private record KeyReadResult(Integer key, boolean ignoredControlSequence) {
         static KeyReadResult keyPressed(int key) {
             return new KeyReadResult(key, false);
@@ -567,17 +604,36 @@ public class Main {
             }
             bindCtrlVToClipboardImage(lineReader);
             bindEscToClearInput(lineReader);
+            bindCtrlCInterrupt(lineReader);
+            CtrlCExit ctrlC = new CtrlCExit();
+            terminal.handle(Terminal.Signal.INT, ignored -> ctrlC.signal());
+            if (System.getProperty("os.name", "").startsWith("Windows")) {
+                // Read Ctrl+C as a key on Windows so the parent .cmd does not receive a console interrupt.
+                Attributes cliAttributes = terminal.getAttributes();
+                cliAttributes.setLocalFlag(Attributes.LocalFlag.ISIG, false);
+                terminal.setAttributes(cliAttributes);
+            }
 
+            commandLoop:
             while (true) {
+                ctrlC.drain(ui, false);
+                if (ctrlC.exitRequested) {
+                    break;
+                }
                 refreshTerminalColumns(terminal);
                 PromptInput promptInput;
                 try {
                     promptInput = readPromptInput(lineReader, renderer, nextTaskUsePlanMode || nextTaskUseTeamMode);
                 } catch (UserInterruptException e) {
-                    continue;  // Ctrl+C 跳过
+                    if (e.getPartialLine() != null && !e.getPartialLine().isEmpty()) {
+                        ctrlC.reset();
+                    }
+                    ctrlC.press(ui, false);
+                    continue;
                 } catch (EndOfFileException e) {
                     break;  // Ctrl+D 退出
                 }
+                ctrlC.reset();
                 if (promptInput.canceled()) {
                     if (nextTaskUsePlanMode) {
                         nextTaskUsePlanMode = false;
@@ -633,23 +689,29 @@ public class Main {
                         } else {
                             ui.println("⏳ 压缩中，等一下下哦...\n");
                         }
-                        Agent.CompactionResult result;
+                        String result;
                         try {
-                            result = reactAgent.compactHistoryNow();
+                            result = runWithCancelSupport(terminal, ui, ctrlC, () -> {
+                                Agent.CompactionResult compacted = reactAgent.compactHistoryNow();
+                                if (compacted.error() != null && !compacted.error().isBlank()) {
+                                    return "❌ 手动压缩失败: " + compacted.error();
+                                }
+                                if (compacted.compacted()) {
+                                    return String.format("📦 已手动压缩历史上下文: %,d -> %,d tokens",
+                                            compacted.beforeTokens(), compacted.afterTokens());
+                                }
+                                return "📭 当前没有需要压缩的历史上下文";
+                            });
                         } finally {
                             if (activityPanel) {
                                 renderer.endActivity();
                             }
                             renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
                         }
-                        if (result.error() != null && !result.error().isBlank()) {
-                            ui.println("❌ 手动压缩失败: " + result.error() + "\n");
-                        } else if (result.compacted()) {
-                            ui.printf("📦 已手动压缩历史上下文: %,d -> %,d tokens%n%n",
-                                    result.beforeTokens(), result.afterTokens());
-                        } else {
-                            ui.println("📭 当前没有需要压缩的历史上下文\n");
+                        if (ctrlC.exitRequested) {
+                            break commandLoop;
                         }
+                        ui.println(result + "\n");
                         continue;
                     }
                     case HISTORY_CLEAR -> {
@@ -1027,10 +1089,12 @@ public class Main {
                 }
                 SnapshotService snapshotService = reactAgent.getToolRegistry().getSnapshotService();
                 renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, snapshotMode));
-                String response = runWithCancelSupport(terminal,
-                        ui,
+                String response = runWithCancelSupport(terminal, ui, ctrlC,
                         () -> snapshotService.runTurn(snapshotMode, taskInput, runTask::call));
-                if (!"react".equals(snapshotMode)) {
+                if (ctrlC.exitRequested) {
+                    break;
+                }
+                if (!"react".equals(snapshotMode) || ctrlC.taskCanceled) {
                     renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
                 }
                 nextTaskUsePlanMode = false;
@@ -1146,44 +1210,74 @@ public class Main {
         return new AgentOrchestrator(llmClient, reactAgent.getToolRegistry(), reactAgent.getMemoryManager(), out);
     }
 
-    private static String runWithCancelSupport(Terminal terminal, PrintStream out, Callable<String> task) {
+    private static String runWithCancelSupport(Terminal terminal, PrintStream out, CtrlCExit ctrlC,
+                                               Callable<String> task) {
+        ctrlC.taskCanceled = false;
         CancellationToken token = CancellationContext.startRun();
+        AtomicReference<Thread> worker = new AtomicReference<>();
         ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
             Thread thread = new Thread(r, "Sidekick-agent-runner");
             thread.setDaemon(true);
+            worker.set(thread);
             return thread;
         });
-        Future<String> future = executor.submit(task);
-        // 进入 raw mode 监听 ESC：raw mode 关 ICANON / ECHO / IEXTEN 但保留 ISIG，所以 Ctrl+C 仍能终止 Sidekick。
         Attributes original = null;
         try {
             if (terminal != null) {
                 try {
                     original = terminal.enterRawMode();
                 } catch (Exception ignored) {
-                    // raw mode 进入失败（非交互终端等），降级为不监听 ESC，靠 Ctrl+C 退出。
+                    // Signal.INT still works when the terminal cannot enter raw mode.
                 }
             }
-            while (!future.isDone()) {
-                if (original != null && readEscCancel(terminal)) {
+            Future<String> future = executor.submit(task);
+            boolean showExitHint = false;
+            while (true) {
+                boolean running = !future.isDone();
+                boolean interrupt = ctrlC.drain(out, running);
+                showExitHint |= interrupt && running;
+                if (ctrlC.exitRequested) {
                     token.cancel();
-                    future.cancel(true);
-                    executor.shutdownNow();
-                    return "⏹️ 已请求取消当前任务。";
+                    return "";
+                }
+                if (future.isDone()) {
+                    if (ctrlC.taskCanceled) {
+                        return "⏹️ 已取消当前任务。" + (showExitHint ? " " + CtrlCExit.EXIT_HINT : "");
+                    }
+                    if (showExitHint) {
+                        out.println(CtrlCExit.EXIT_HINT);
+                    }
+                    return future.get();
+                }
+
+                TaskKey key = original == null ? TaskKey.NONE : readTaskKey(terminal);
+                if (key == TaskKey.CTRL_C) {
+                    running = !future.isDone();
+                    ctrlC.press(out, running);
+                    showExitHint |= running;
+                }
+                if ((interrupt || key != TaskKey.NONE) && !ctrlC.taskCanceled && !future.isDone()) {
+                    ctrlC.taskCanceled = true;
+                    token.cancel();
+                    worker.get().interrupt();
+                }
+                if (ctrlC.exitRequested) {
+                    return "";
                 }
                 try {
-                    return future.get(150, TimeUnit.MILLISECONDS);
+                    future.get(100, TimeUnit.MILLISECONDS);
                 } catch (java.util.concurrent.TimeoutException ignored) {
-                    // 继续监听 ESC
+                    // Poll again for an interrupt or completion.
+                } catch (ExecutionException e) {
+                    if (!ctrlC.taskCanceled) {
+                        throw e;
+                    }
                 }
             }
-            return future.get();
-        } catch (CancellationException e) {
-            return "⏹️ 已取消当前任务。";
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            ctrlC.taskCanceled = true;
             token.cancel();
-            future.cancel(true);
             return "⏹️ 已取消当前任务。";
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
@@ -1201,38 +1295,29 @@ public class Main {
         }
     }
 
-    /**
-     * 任务运行期间监听 ESC 按键。raw mode 下 ESC 字节是 0x1b（27）。
-     *
-     * 关键陷阱：方向键 / Home / End 等由 ESC + 控制序列组成（如 ESC[A），不能误判为单 ESC 取消。
-     * 复用 {@link #readInputBurst} + {@link #classifyEscapeSequence}：
-     * - STANDALONE_ESC（孤立的 ESC）→ 用户取消
-     * - CONTROL_SEQUENCE / BRACKETED_PASTE / OTHER → 丢弃，不取消
-     */
-    static boolean readEscCancel(Terminal terminal) {
+    enum TaskKey {
+        NONE, ESCAPE, CTRL_C
+    }
+
+    /** Read a raw Ctrl+C or a standalone Esc. Ignore terminal control sequences and pasted text. */
+    static TaskKey readTaskKey(Terminal terminal) {
         if (terminal == null) {
-            return false;
+            return TaskKey.NONE;
         }
         try {
             NonBlockingReader reader = terminal.reader();
             int next = reader.read(50);
-            if (next == NonBlockingReader.READ_EXPIRED || next < 0) {
-                return false;
+            if (next == 27) {
+                String tail = readInputBurst(terminal, 80, 20, 120);
+                return decideEscCancel(next, tail) ? TaskKey.ESCAPE : TaskKey.NONE;
             }
-            String escTail = next == 27 ? readInputBurst(terminal, 80, 20, 120) : null;
-            if (next != 27) {
-                // 非 ESC 输入，drain 这一轮残余字节避免堆积，但不触发取消。
-                while (true) {
-                    int more = reader.read(1);
-                    if (more == NonBlockingReader.READ_EXPIRED || more < 0) {
-                        break;
-                    }
-                }
+            // Drain other keys typed during a task, but never discard Ctrl+C with them.
+            while (next >= 0 && next != 3) {
+                next = reader.read(1);
             }
-            return decideEscCancel(next, escTail);
+            return next == 3 ? TaskKey.CTRL_C : TaskKey.NONE;
         } catch (Exception ignored) {
-            // 监听是 best-effort；失败不能影响任务执行。
-            return false;
+            return TaskKey.NONE;
         }
     }
 
@@ -1470,7 +1555,7 @@ public class Main {
                 "输入你的问题或任务",
                 "输入 '/' 后按 Tab 补全命令",
                 "输入 '@server:protocol://path' 可显式引用 MCP resource",
-                "任务运行中按 ESC 取消当前任务",
+                "任务运行中按 Esc 或 Ctrl+C 取消，连续两次 Ctrl+C 退出",
                 "默认模式是 ReAct"
         );
     }
@@ -1923,6 +2008,20 @@ public class Main {
             KeyMap<org.jline.reader.Binding> map = lineReader.getKeyMaps().get(mapName);
             if (map != null) {
                 map.bind(ref, ctrlV);
+            }
+        }
+    }
+
+    private static void bindCtrlCInterrupt(LineReader lineReader) {
+        String widget = "Sidekick-ctrl-c";
+        lineReader.getWidgets().put(widget, () -> {
+            throw new UserInterruptException(lineReader.getBuffer().toString());
+        });
+        Reference interrupt = new Reference(widget);
+        for (String mapName : List.of(LineReader.MAIN, LineReader.EMACS, LineReader.VIINS, LineReader.VICMD)) {
+            KeyMap<Binding> map = lineReader.getKeyMaps().get(mapName);
+            if (map != null) {
+                map.bind(interrupt, KeyMap.ctrl('C'));
             }
         }
     }

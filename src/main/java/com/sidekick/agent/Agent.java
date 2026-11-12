@@ -283,8 +283,12 @@ public class Agent {
                 return formatUserFacingResponse(reasoningTranscript.toString(), response.content());
 
             } catch (IOException e) {
-                log.error("LLM call failed in ReAct loop", e);
                 streamRenderer.finish();
+                if (CancellationContext.isCancelled()) {
+                    pushStatus(budget, startNanos, "idle");
+                    return "⏹️ 已取消当前任务。";
+                }
+                log.error("LLM call failed in ReAct loop", e);
                 return "❌ 调用 LLM 失败: " + e.getMessage();
             }
         }

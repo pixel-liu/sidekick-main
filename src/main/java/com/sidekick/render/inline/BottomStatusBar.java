@@ -29,20 +29,25 @@ public final class BottomStatusBar implements AutoCloseable {
     private static final int MIN_PATH_WIDTH = 12;
     private static final String PARTIAL_BLOCKS = "▏▎▍▌▋▊▉";
     private static final Pattern SKILL_RATIO = Pattern.compile("Skill (\\d+)/(\\d+)");
-    private static final AttributedStyle BASE_STYLE = style(AttributedStyle.DEFAULT
-            .foreground(AttributedStyle.BRIGHT | AttributedStyle.WHITE));
-    private static final AttributedStyle EMPHASIS_STYLE = style(BASE_STYLE.bold());
+    private static final AttributedStyle HITL_STYLE = style(palette(221).bold());
+    private static final AttributedStyle MODEL_STYLE = style(palette(147).bold());
+    private static final AttributedStyle CONTEXT_STYLE = style(palette(116).bold());
+    private static final AttributedStyle CONTEXT_SIZE_STYLE = palette(152);
+    private static final AttributedStyle PHASE_STYLE = palette(216);
+    private static final AttributedStyle PATH_STYLE = palette(180);
+    private static final AttributedStyle TRACK_STYLE = palette(67);
     private static final AttributedStyle WARNING_STYLE = style(AttributedStyle.DEFAULT
             .foreground(AttributedStyle.BRIGHT | AttributedStyle.YELLOW).bold());
     private static final AttributedStyle CRITICAL_STYLE = style(AttributedStyle.DEFAULT
             .foreground(AttributedStyle.BRIGHT | AttributedStyle.RED).bold());
 
-    private static final AttributedStyle CYAN_STYLE = palette(117);
-    private static final AttributedStyle SKILL_STYLE = palette(183);
-    private static final AttributedStyle USAGE_STYLE = palette(156);
+    private static final AttributedStyle INPUT_STYLE = palette(153);
+    private static final AttributedStyle OUTPUT_STYLE = palette(156);
+    private static final AttributedStyle CACHE_STYLE = palette(213);
     private static final AttributedStyle COST_STYLE = palette(222);
-    private static final AttributedStyle SECONDARY_STYLE = palette(250);
-    private static final AttributedStyle TRACK_STYLE = palette(246);
+    private static final AttributedStyle ELAPSED_STYLE = palette(223);
+    private static final AttributedStyle MCP_STYLE = palette(81);
+    private static final AttributedStyle SKILL_STYLE = palette(183);
 
     private final Terminal terminal;
     private final PrintStream out;
@@ -74,7 +79,7 @@ public final class BottomStatusBar implements AutoCloseable {
     }
 
     public void update(StatusInfo info) {
-        this.current = mergeEnvironment(info, current);
+        this.current = mergeStatus(info, current);
         renderDock();
     }
 
@@ -134,7 +139,7 @@ public final class BottomStatusBar implements AutoCloseable {
         }
     }
 
-    private static StatusInfo mergeEnvironment(StatusInfo next, StatusInfo previous) {
+    private static StatusInfo mergeStatus(StatusInfo next, StatusInfo previous) {
         if (next == null || previous == null) {
             return next;
         }
@@ -144,14 +149,20 @@ public final class BottomStatusBar implements AutoCloseable {
         String skill = next.skillSummary() == null || next.skillSummary().isBlank()
                 ? previous.skillSummary()
                 : next.skillSummary();
-        if (mcp == next.mcpSummary() && skill == next.skillSummary()) {
-            return next;
+        if (mcp != next.mcpSummary() || skill != next.skillSummary()) {
+            next = next.withEnvironment(mcp, skill);
         }
-        return next.withEnvironment(mcp, skill);
+        if (!next.hasTokenUsage() && previous.hasTokenUsage()) {
+            next = next.withRequestUsage(previous);
+        }
+        return next;
     }
 
     static List<AttributedString> formatStatusLines(StatusInfo info, int cols) {
-        return List.of(formatSessionLine(info, cols), formatDetailsLine(info, cols));
+        // Keep the last terminal column blank so the status text does not trigger auto-wrap.
+        int contentWidth = Math.max(0, cols - 1);
+        return List.of(fitToColumns(formatSessionLine(info, contentWidth), cols),
+                fitToColumns(formatDetailsLine(info, contentWidth), cols));
     }
 
     private static AttributedString formatSessionLine(StatusInfo info, int cols) {
@@ -184,13 +195,13 @@ public final class BottomStatusBar implements AutoCloseable {
 
         AttributedStringBuilder line = new AttributedStringBuilder();
         if (reservedMode > 0) {
-            line.append(mode, EMPHASIS_STYLE);
+            line.append(mode, HITL_STYLE);
         }
         appendField(line, shorten(model, room - reservedMode - reservedPath - GAP.length(), false),
-                EMPHASIS_STYLE, cols);
+                MODEL_STYLE, cols);
         AttributedStringBuilder context = new AttributedStringBuilder();
         AttributedStyle levelStyle = contextPercentStyle(percent);
-        context.append("ctx ", BASE_STYLE).append(percent + "%", levelStyle);
+        context.append(contextLabel, levelStyle);
         if (barWidth > 0) {
             context.append(GAP);
             appendProgress(context, ratio, barWidth, levelStyle);
@@ -207,14 +218,14 @@ public final class BottomStatusBar implements AutoCloseable {
         }
         int pathField = pathWidth > 0 ? pathWidth + GAP.length() : 0;
         appendField(line, "(" + formatTokens(total) + "/" + formatTokens(window) + ")",
-                SECONDARY_STYLE, cols - pathField - fieldWidth(phase));
-        appendField(line, phase, WARNING_STYLE, cols - pathField);
+                CONTEXT_SIZE_STYLE, cols - pathField - fieldWidth(phase));
+        appendField(line, phase, PHASE_STYLE, cols - pathField);
         if (pathWidth > 0) {
             String shownPath = shorten(path, pathWidth, true);
             line.append(" ".repeat(cols - line.columnLength() - width(shownPath)));
-            line.append(shownPath, SECONDARY_STYLE);
+            line.append(shownPath, PATH_STYLE);
         }
-        return fitToColumns(line.toAttributedString(), cols);
+        return line.toAttributedString();
     }
 
     private static void appendProgress(AttributedStringBuilder context, double ratio, int barWidth, AttributedStyle fill) {
@@ -229,37 +240,49 @@ public final class BottomStatusBar implements AutoCloseable {
     }
 
     private static AttributedString formatDetailsLine(StatusInfo info, int cols) {
-        List<AttributedString> fields = new ArrayList<>();
-        int remaining = addDetail(fields, info.mcpSummary(), CYAN_STYLE, cols);
-        remaining = addDetail(fields, formatSkills(info.skillSummary()), SKILL_STYLE, remaining);
-        if (info.inputTokens() > 0 || info.outputTokens() > 0 || info.cachedInputTokens() > 0) {
-            String usage = "in " + formatTokens(info.inputTokens()) + " / out " + formatTokens(info.outputTokens());
-            String cache = info.cachedInputTokens() > 0 ? " / cache " + formatTokens(info.cachedInputTokens()) : "";
-            remaining = addDetail(fields, width(usage + cache) + (fields.isEmpty() ? 0 : GAP.length()) <= remaining
-                    ? usage + cache : usage, USAGE_STYLE, remaining);
-            remaining = addDetail(fields, info.estimatedCost(), COST_STYLE, remaining);
+        boolean measured = info.hasTokenUsage();
+        String input = measured ? formatTokens(info.inputTokens()) : "—";
+        String output = measured ? formatTokens(info.outputTokens()) : "—";
+        String cache = measured ? formatTokens(info.cachedInputTokens()) : "—";
+        List<AttributedString> fields = new ArrayList<>(List.of(
+                new AttributedString("in " + input, INPUT_STYLE),
+                new AttributedString("out " + output, OUTPUT_STYLE),
+                new AttributedString("cache " + cache, CACHE_STYLE)));
+        int tokenWidth = fields.stream().mapToInt(AttributedString::columnLength).sum();
+        int gap = cols - tokenWidth >= 2 * GAP.length() ? GAP.length() : 1;
+        if (tokenWidth + 2 * gap > cols) {
+            fields.set(0, new AttributedString("I:" + input, INPUT_STYLE));
+            fields.set(1, new AttributedString("O:" + output, OUTPUT_STYLE));
+            fields.set(2, new AttributedString("C:" + cache, CACHE_STYLE));
+            tokenWidth = fields.stream().mapToInt(AttributedString::columnLength).sum();
         }
+        int remaining = Math.max(0, cols - tokenWidth - 2 * gap);
+        remaining = addDetail(fields, info.estimatedCost(), COST_STYLE, gap, remaining);
         if (info.elapsedMillis() > 0) {
-            remaining = addDetail(fields, formatElapsed(info.elapsedMillis()), SECONDARY_STYLE, remaining);
+            remaining = addDetail(fields, formatElapsed(info.elapsedMillis()), ELAPSED_STYLE, gap, remaining);
         }
+        remaining = addDetail(fields, info.mcpSummary(), MCP_STYLE, gap, remaining);
+        remaining = addDetail(fields, formatSkills(info.skillSummary()), SKILL_STYLE, gap, remaining);
 
         AttributedStringBuilder line = new AttributedStringBuilder();
-        int gaps = Math.max(1, fields.size() - 1);
+        int gaps = fields.size() - 1;
         for (int i = 0; i < fields.size(); i++) {
             if (i > 0) {
-                line.append(" ".repeat(GAP.length() + remaining / gaps + (i <= remaining % gaps ? 1 : 0)));
+                line.append(" ".repeat(gap + remaining / gaps + (i <= remaining % gaps ? 1 : 0)));
             }
             line.append(fields.get(i));
         }
-        return fitToColumns(line.toAttributedString(), cols);
+        AttributedString details = line.toAttributedString();
+        return details.columnLength() > cols ? details.columnSubSequence(0, cols) : details;
     }
 
-    private static int addDetail(List<AttributedString> fields, String value, AttributedStyle color, int remaining) {
+    private static int addDetail(List<AttributedString> fields, String value, AttributedStyle color,
+                                 int gap, int remaining) {
         if (value == null || value.isBlank()) {
             return remaining;
         }
         AttributedString field = new AttributedString(value.trim(), color);
-        int used = field.columnLength() + (fields.isEmpty() ? 0 : GAP.length());
+        int used = field.columnLength() + gap;
         if (used <= remaining) {
             fields.add(field);
             return remaining - used;
@@ -327,7 +350,7 @@ public final class BottomStatusBar implements AutoCloseable {
         if (percent >= 70) {
             return WARNING_STYLE;
         }
-        return style(CYAN_STYLE.bold());
+        return CONTEXT_STYLE;
     }
 
     private static AttributedStyle palette(int index) {
@@ -352,7 +375,7 @@ public final class BottomStatusBar implements AutoCloseable {
         }
         AttributedStringBuilder builder = new AttributedStringBuilder(cols);
         builder.append(safe);
-        builder.append(" ".repeat(cols - length), BASE_STYLE);
+        builder.append(" ".repeat(cols - length));
         return builder.toAttributedString();
     }
 
