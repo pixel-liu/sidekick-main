@@ -473,7 +473,8 @@ public class Main {
         }
         AtomicReference<LlmClient> llmClientRef = new AtomicReference<>(llmClient);
 
-        try (Terminal terminal = TerminalBuilder.builder().system(true).dumb(true).build()) {
+        try (Terminal terminal = TerminalBuilder.builder().system(true).dumb(true).build();
+             Renderer renderer = RendererFactory.create(RendererFactory.resolveMode(), terminal)) {
             refreshTerminalColumns(terminal);
             TerminalHitlHandler terminalHitlHandler = new TerminalHitlHandler(true);
             SwitchableHitlHandler hitlHandler = new SwitchableHitlHandler(terminalHitlHandler);
@@ -503,7 +504,6 @@ public class Main {
                 }
             });
 
-            Renderer renderer = RendererFactory.create(RendererFactory.resolveMode(), terminal);
             ChatLineReader lineReader = renderer instanceof InlineRenderer inline
                     ? inline.createLineReader() : new ChatLineReader(terminal);
             lineReader.setHistory(new SidekickHistory());
@@ -666,9 +666,7 @@ public class Main {
                         continue;
                     }
                     case EXIT -> {
-                        ui.println("\n👋 再见!");
-                        renderer.close();
-                        return;
+                        break commandLoop;
                     }
                     case CANCEL -> {
                         ui.println("当前没有正在运行的任务。\n");
@@ -1104,8 +1102,8 @@ public class Main {
                     ui.println();
                 }
             }
+            renderer.endActivity();
             ui.println("\n👋 再见!");
-            renderer.close();
 
         } catch (IOException e) {
             System.err.println("❌ 终端初始化失败: " + e.getMessage());

@@ -124,17 +124,22 @@ public final class InlineRenderer implements Renderer {
 
     @Override
     public void close() {
-        if (closed) {
-            return;
+        synchronized (transcriptLock) {
+            if (closed) {
+                return;
+            }
+            closed = true;
         }
-        closed = true;
-        if (activityDisplay != null) {
-            activityDisplay.close();
+        try {
+            if (activityDisplay != null) {
+                activityDisplay.close();
+            }
+        } finally {
+            if (statusBar != null) {
+                statusBar.close();
+            }
+            fallback.close();
         }
-        if (statusBar != null) {
-            statusBar.close();
-        }
-        fallback.close();
     }
 
     @Override
@@ -325,6 +330,9 @@ public final class InlineRenderer implements Renderer {
                 }
                 String text = new String(b, off, len, StandardCharsets.UTF_8);
                 synchronized (transcriptLock) {
+                    if (closed) {
+                        return;
+                    }
                     if (redrawing) {
                         // 重绘期间 BlockEntry.render() 已经决定折叠/展开形态，原样转发不再走折叠状态机
                         delegate.write(b, off, len);
