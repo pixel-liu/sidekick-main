@@ -71,7 +71,7 @@ java -jar target/Sidekick-1.0-SNAPSHOT.jar
 /plan 为当前项目补充一个测试，然后运行相关回归
 ```
 
-默认终端界面在对话下方显示 `❯` 聊天输入框。空输入时显示一条示例，开始输入后自动隐藏，粘贴多行内容会展开输入区。底栏第一行显示审批模式、模型、上下文用量和活动阶段，第二行显示当前目录、MCP、技能和最近一次任务的用量。窄窗口会缩短目录和模型名，并按可用宽度收起次要字段。
+默认终端界面在对话下方显示 `❯` 聊天输入框。空输入时显示一条示例，开始输入后自动隐藏，粘贴多行内容会展开输入区。底栏第一行显示模型、上下文百分比和进度条，当前目录靠右；启用审批时显示 `HITL`。第二行均匀排开 MCP、技能、最近任务用量、费用和耗时。窄窗口会缩短目录、模型名和进度条，并按可用宽度收起次要字段。
 
 单独输入 `/plan` 或 `/team` 后，可以在输入框为空时按 Esc 取消待执行模式。有草稿时按 Esc 会先清空草稿。
 
@@ -86,7 +86,7 @@ java -jar target/Sidekick-1.0-SNAPSHOT.jar
 | MCP 与浏览器 | `/mcp`、`/mcp restart <name>`、`/browser status/connect/disconnect/tabs` |
 | Skill | `/skill list`、`/skill show <name>`、`/skill on/off <name>`、`/skill reload` |
 | 安全与回滚 | `/hitl on/off`、`/policy`、`/audit [N]`、`/snapshot`、`/restore <N>` |
-| 其他 | `/task`、`/wechat`、`/export`、`/init`、`/clear`、`/exit` |
+| 其他 | `/task`、`/export`、`/init`、`/clear`、`/exit` |
 
 输入 `/help` 或在命令后按补全键可查看完整参数。
 
@@ -109,7 +109,7 @@ java -jar target/Sidekick-1.0-SNAPSHOT.jar
 
 Agent 可使用 `read_file`、`write_file`、`list_dir`、`glob_files`、`grep_code`、`execute_command`、`search_code`、`web_search`、`web_fetch` 和动态注册的 `mcp__{server}__{tool}` 工具。精确代码定位优先 `glob_files`、`grep_code` 与 `read_file`；`search_code` 用于语义辅助。
 
-文件和代码检索工具只能访问项目根目录内的路径。`execute_command` 默认 60 秒超时，超时会终止完整进程树，并预先拒绝高风险命令。开启 `/hitl on` 后，写文件、执行命令、创建项目、回滚等操作需要人工确认；审计日志写入 `~/.sidekick/audit/`。
+文件和代码检索工具只能访问项目根目录内的路径。`execute_command` 默认 60 秒超时，超时会终止完整进程树，并预先拒绝高风险命令。交互会话默认开启 HITL，写文件、执行命令、创建项目等危险工具需要人工确认；可用 `/hitl off` 在当前会话关闭。审计日志写入 `~/.sidekick/audit/`。
 
 ## 配置与数据位置
 
@@ -123,6 +123,8 @@ Agent 可使用 `read_file`、`write_file`、`list_dir`、`glob_files`、`grep_c
 | 项目记忆 | `SideKick.md`、`.sidekick/SideKick.md`；兼容 `PAI.md` |
 | 长期记忆 | `~/.sidekick/memory/long_term_memory.json` |
 | 代码索引 | `~/.sidekick/rag/codebase.db` |
+
+ReAct 日志中的 `ReAct LLM timing` 按请求记录准备时间、收到首段思考和首段正文的时间、模型调用总时长（毫秒）。`-1` 表示没有收到该类内容。
 
 MCP 配置文件不存在时会创建默认 Chrome DevTools 配置。自定义 MCP server 可使用 stdio `command` 或 Streamable HTTP `url`；配置中的 `${PROJECT_DIR}`、`${HOME}` 和环境变量会在启动时展开。
 

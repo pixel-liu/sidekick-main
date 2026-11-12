@@ -12,6 +12,8 @@ import org.mockito.Mockito;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -25,10 +27,16 @@ class BottomStatusBarTest {
                 true, 1500L, "running").withEnvironment("MCP 0/1", "Skill 1/1");
         var lines = BottomStatusBar.formatStatusLines(info, 200);
 
-        assertEquals("HITL · glm-5.1 · ctx 1% (1.2k/200.0k) · running", lines.get(0).toString().stripTrailing());
+        String session = lines.get(0).toString();
+        String directory = Path.of(System.getProperty("user.dir")).getFileName().toString();
+        assertTrue(session.startsWith("HITL  glm-5.1  ctx 1%  ▏░░░░░░░  (1.2k/200.0k)  running"), session);
+        assertTrue(session.endsWith(directory), session);
         String details = lines.get(1).toString();
-        assertTrue(details.contains("MCP 0/1 · 1 skill · in 1.0k / out 234 · cache 100 · ¥0.0123 · 1.5s"), details);
-        assertTrue(details.startsWith(details.stripLeading()), details);
+        assertEquals("MCP 0/1|1 skill|in 1.0k / out 234 / cache 100|¥0.0123|1.5s",
+                details.replaceAll(" {2,}", "|"));
+        int[] gaps = Pattern.compile(" {2,}").matcher(details).results()
+                .mapToInt(gap -> gap.end() - gap.start()).sorted().toArray();
+        assertTrue(gaps[gaps.length - 1] - gaps[0] <= 1, details);
     }
 
     @Test
@@ -44,15 +52,22 @@ class BottomStatusBarTest {
     }
 
     @Test
-    void narrowStatusKeepsModeAndContextAndFitsWideCharacters() {
+    void narrowStatusKeepsContextAndFitsWideCharacters() {
         StatusInfo info = StatusInfo.idle("超长中文模型名称", 200_000L, false)
                 .withEnvironment("MCP 4/4", "Skill 2/2");
         var lines = BottomStatusBar.formatStatusLines(info, 22);
         String session = lines.get(0).toString();
         assertEquals(22, lines.get(0).columnLength());
         assertEquals(22, lines.get(1).columnLength());
-        assertTrue(session.startsWith("YOLO · 超长"), session);
-        assertTrue(session.contains("… · ctx 0%"), session);
+        assertTrue(session.startsWith("超长"), session);
+        assertTrue(session.contains("…  ctx 0%  ░"), session);
+        assertFalse(session.contains("YOLO"), session);
+
+        String midWidth = BottomStatusBar.formatStatusLines(info, 46).get(0).toString();
+        String directory = Path.of(System.getProperty("user.dir")).getFileName().toString();
+        String tail = directory.substring(directory.offsetByCodePoints(directory.length(),
+                -Math.min(5, directory.codePointCount(0, directory.length()))));
+        assertTrue(midWidth.endsWith(tail), midWidth);
     }
 
     @Test
@@ -78,13 +93,15 @@ class BottomStatusBarTest {
         var lines = BottomStatusBar.formatStatusLines(info, 140);
         assertEquals(2, lines.size());
         AttributedStyle white = AttributedStyle.DEFAULT.foreground(AttributedStyle.BRIGHT | AttributedStyle.WHITE);
-        AttributedStyle yellow = AttributedStyle.DEFAULT.foreground(AttributedStyle.BRIGHT | AttributedStyle.YELLOW);
         AttributedStyle red = AttributedStyle.DEFAULT.foreground(AttributedStyle.BRIGHT | AttributedStyle.RED);
-        assertSegmentStyle(lines.get(0), "YOLO", yellow.bold());
+        assertFalse(lines.get(0).toString().contains("YOLO"));
+        assertFalse(lines.get(0).toString().contains("HITL"));
         assertSegmentStyle(lines.get(0), "deepseek-v4-pro", white.bold());
         assertSegmentStyle(lines.get(0), "95%", red.bold());
-        assertSegmentStyle(lines.get(1), "MCP 5/5 · 3/5 skills", white);
-        assertSegmentStyle(lines.get(1), "in 16.1k / out 437 · cache 14.3k", white);
+        assertSegmentStyle(lines.get(0), "███████▋", red.bold());
+        assertSegmentStyle(lines.get(1), "MCP 5/5", AttributedStyle.DEFAULT.foreground(117));
+        assertSegmentStyle(lines.get(1), "3/5 skills", AttributedStyle.DEFAULT.foreground(183));
+        assertSegmentStyle(lines.get(1), "in 16.1k / out 437 / cache 14.3k", AttributedStyle.DEFAULT.foreground(156));
     }
 
     @Test
