@@ -10,7 +10,7 @@ Read SideKick.md for the shared architecture and development commands.
 ## Inline terminal input
 
 - Keep chat-frame decoration and the empty-input hint in JLine's display. All three task modes share the line editor. Esc clears a draft or cancels an armed Plan/Team mode when the input is empty. Ctrl+C cancels a running CLI task, and a second press within two seconds exits. On CLI exit, hide the status rows and restore full terminal scrolling before closing the terminal.
-- Use one status row for the model, `ctx` percentage and progress bar, and grouped recent request `in/out/cache`. Show cost when space allows. Keep the three token fields visible before any reported usage and retain the latest reported values on status refresh. New interactive sessions default to HITL approval. The bottom bar omits the HITL badge, MCP count, and skill count.
+- Use one status row with the model and `ctx` percentage and progress bar on the left, and grouped recent request `in/out/cache` on the right. Show cost with usage when space allows. Keep the three token fields visible before any reported usage and retain the latest reported values on status refresh. New interactive sessions default to HITL approval. The bottom bar omits the HITL badge, MCP count, and skill count.
 - Show the starting directory next to the SK logo. Use gray for the banner text and bright white for the model name. Print elapsed time and local completion time in gray after completed inline answers, including streamed answers.
 - Validate interactive input and the status layout with `mvn test -Pphase16-smoke`.
 

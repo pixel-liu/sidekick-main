@@ -27,12 +27,13 @@ class BottomStatusBarTest {
     void groupsUsageAfterContextOnOneRow() {
         StatusInfo info = StatusInfo.tokens("glm-5.1", 200_000L, 1200L, 1000L, 234L, 100L, "¥0.0123",
                 true, 1500L, "running").withEnvironment("MCP 0/1", "Skill 1/1");
-        var lines = BottomStatusBar.formatStatusLines(info, 200);
+        var lines = BottomStatusBar.formatStatusLines(info, 120, false);
 
         String session = lines.get(0).toString();
         assertEquals(1, lines.size());
-        assertTrue(session.startsWith("glm-5.1  ctx 1%  ▏░░░░░░░  (1.2k/200.0k)"
-                + "  in 1.0k  out 234  cache 100  running  ¥0.0123"), session);
+        assertTrue(session.startsWith("glm-5.1  ctx 1%  ▏░░░░░░░  (1.2k/200.0k)  running"), session);
+        assertTrue(session.endsWith("in 1.0k  out 234  cache 100  ¥0.0123 "), session);
+        assertEquals(120, lines.get(0).columnLength());
         assertFalse(session.contains(Path.of(System.getProperty("user.dir")).toString()), session);
         assertFalse(session.contains("1.5s"), session);
         assertFalse(session.contains("HITL"), session);
@@ -56,7 +57,7 @@ class BottomStatusBarTest {
     void narrowStatusKeepsContextAndFitsWideCharacters() {
         StatusInfo info = StatusInfo.idle("超长中文模型名称", 200_000L, false)
                 .withEnvironment("MCP 4/4", "Skill 2/2");
-        AttributedString line = BottomStatusBar.formatStatusLines(info, 42).get(0);
+        AttributedString line = BottomStatusBar.formatStatusLines(info, 42, false).get(0);
         String session = line.toString();
         assertEquals(42, line.columnLength());
         assertTrue(session.startsWith("超长"), session);
@@ -72,7 +73,7 @@ class BottomStatusBarTest {
         StatusInfo info = StatusInfo.tokens("deepseek-v4-pro", 1_000_000L, 950_000L, 16_100L,
                         437L, 14_300L, null, false, 0L, "idle")
                 .withEnvironment("MCP 5/5", "Skill 3/5");
-        AttributedString line = BottomStatusBar.formatStatusLines(info, 140).get(0);
+        AttributedString line = BottomStatusBar.formatStatusLines(info, 140, false).get(0);
         AttributedStyle red = AttributedStyle.DEFAULT.foreground(AttributedStyle.BRIGHT | AttributedStyle.RED);
         assertSegmentStyle(line, "deepseek-v4-pro", AttributedStyle.DEFAULT.foreground(147).bold());
         assertSegmentStyle(line, "ctx 95%", red.bold());
@@ -82,10 +83,28 @@ class BottomStatusBarTest {
         assertSegmentStyle(line, "cache 14.3k", AttributedStyle.DEFAULT.foreground(213));
 
         AttributedString warning = BottomStatusBar.formatStatusLines(
-                StatusInfo.idle("model", 100, 70, true), 120).get(0);
+                StatusInfo.idle("model", 100, 70, true), 120, false).get(0);
         AttributedStyle yellow = AttributedStyle.DEFAULT.foreground(AttributedStyle.BRIGHT | AttributedStyle.YELLOW);
         assertSegmentStyle(warning, "ctx 70%", yellow.bold());
         assertSegmentStyle(warning, "█████▋", yellow.bold());
+    }
+
+    @Test
+    void windowsStatusPadsTheFirstColumnBeforePrintingTheModel() throws Exception {
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        try (Terminal terminal = TerminalBuilder.builder().system(false).type("windows-vtp")
+                .streams(InputStream.nullInputStream(), sink).build();
+             BottomStatusBar bar = new BottomStatusBar(terminal)) {
+            terminal.setSize(new Size(100, 24));
+            bar.start();
+            bar.update(StatusInfo.idle("deepseek-v4-flash", 1_000_000L, true));
+
+            String emitted = sink.toString(StandardCharsets.UTF_8);
+            int start = emitted.lastIndexOf(AnsiSeq.moveCursor(24, 1));
+            assertTrue(start >= 0, emitted);
+            String painted = AttributedString.fromAnsi(emitted.substring(start)).toString();
+            assertTrue(painted.startsWith(" deepseek-v4-flash  ctx "), painted);
+        }
     }
 
     @Test
@@ -209,7 +228,7 @@ class BottomStatusBarTest {
     }
 
     private static String statusLine(StatusInfo info, int columns) {
-        return BottomStatusBar.formatStatusLines(info, columns).get(0).toString();
+        return BottomStatusBar.formatStatusLines(info, columns, false).get(0).toString();
     }
 
     private static void assertSegmentStyle(AttributedString line, String segment, AttributedStyle colorStyle) {
