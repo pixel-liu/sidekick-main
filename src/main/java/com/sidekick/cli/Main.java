@@ -118,6 +118,7 @@ public class Main {
     private static final String DEFAULT_HISTORY_FILE_NAME = "input.history";
     private static final String BRACKETED_PASTE_BEGIN = "[200~";
     private static final String CLEAR_INPUT_WIDGET = "Sidekick-clear-input";
+    private static final DateTimeFormatter COMPLETION_TIME = DateTimeFormatter.ofPattern("HH:mm");
     private static final Pattern SENSITIVE_FLAG_VALUE = Pattern.compile(
             "(?i)(--?(?:api[_-]?key|authorization|password|passwd|secret|token)\\s+)(\\S+)");
     private static final Pattern SENSITIVE_ASSIGNMENT = Pattern.compile(
@@ -1087,8 +1088,11 @@ public class Main {
                 }
                 SnapshotService snapshotService = reactAgent.getToolRegistry().getSnapshotService();
                 renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, snapshotMode));
+                long taskStartedAt = System.nanoTime();
                 String response = runWithCancelSupport(terminal, ui, ctrlC,
                         () -> snapshotService.runTurn(snapshotMode, taskInput, runTask::call));
+                long taskElapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - taskStartedAt);
+                LocalDateTime taskCompletedAt = LocalDateTime.now();
                 if (ctrlC.exitRequested) {
                     break;
                 }
@@ -1099,6 +1103,11 @@ public class Main {
                 nextTaskUseTeamMode = false;
                 if (response != null && !response.isBlank()) {
                     ui.println(response);
+                    ui.println();
+                }
+                if (renderer instanceof InlineRenderer && !ctrlC.taskCanceled && response != null
+                        && !response.startsWith("❌") && !response.startsWith("⏹")) {
+                    ui.println(turnTimingLine(taskElapsedMillis, taskCompletedAt));
                     ui.println();
                 }
             }
@@ -3005,27 +3014,45 @@ public class Main {
         String skills = info.skillsTotal() <= 0
                 ? "0 skills"
                 : info.skillsEnabled() + "/" + info.skillsTotal() + " skills";
-        String ready = "Model " + model + " (" + provider + ")";
-        String capabilities = "ReAct · Plan · MCP · Browser · Image · Tools · Memory · RAG";
+        String ready = AnsiStyle.thinkingQuote("Model ") + AnsiStyle.brightWhite(model)
+                + AnsiStyle.thinkingQuote(" (" + provider + ")");
         String state = mcp + " · " + skills + " · ReAct";
         List<String> lines = new ArrayList<>(List.of(
-                "   " + AnsiStyle.section(" ██████╗  ██╗  ██╗") + "    " + AnsiStyle.brightWhite("Sidekick v" + VERSION),
-                "   " + AnsiStyle.section("██╔════╝  ██║ ██╔╝") + "    " + AnsiStyle.brightWhite(ready),
-                "   " + AnsiStyle.section("╚█████╗   █████╔╝ ") + "    " + AnsiStyle.brightWhite(state),
-                "   " + AnsiStyle.section(" ╚═══██╗  ██╔═██╗ ") + "    " + AnsiStyle.brightWhite(capabilities),
-                "   " + AnsiStyle.section("██████╔╝  ██║  ██╗"),
-                "   " + AnsiStyle.section("╚═════╝   ╚═╝  ╚═╝"),
-                "",
-                "Tips for getting started:",
-                "1. Type " + AnsiStyle.emphasis("/") + " for commands and Tab completion",
-                "2. Ask coding questions, edit code or run commands",
-                "3. Attach context with " + AnsiStyle.emphasis("@path") + " or " + AnsiStyle.emphasis("@image:")
+                "   " + AnsiStyle.section(" ██████╗  ██╗  ██╗") + "    " + AnsiStyle.thinkingQuote("Sidekick v" + VERSION),
+                "   " + AnsiStyle.section("██╔════╝  ██║ ██╔╝") + "    " + ready,
+                "   " + AnsiStyle.section("╚█████╗   █████╔╝ ") + "    " + AnsiStyle.thinkingQuote(state),
+                "   " + AnsiStyle.section(" ╚═══██╗  ██╔═██╗ "),
+                "   " + AnsiStyle.section("██████╔╝  ██║  ██╗") + "    " + AnsiStyle.thinkingQuote(workingDirectoryLabel()),
+                "   " + AnsiStyle.section("╚═════╝   ╚═╝  ╚═╝")
         ));
         if (info.note() != null && !info.note().isBlank()) {
             lines.add("");
             lines.add(AnsiStyle.subtle(info.note().replace('\n', ' ')));
         }
         return lines;
+    }
+
+    private static String workingDirectoryLabel() {
+        Path directory = Path.of("").toAbsolutePath().normalize();
+        Path home = Path.of(System.getProperty("user.home")).toAbsolutePath().normalize();
+        if (directory.equals(home)) {
+            return "~";
+        }
+        return directory.startsWith(home) ? "~" + home.getFileSystem().getSeparator() + home.relativize(directory)
+                : directory.toString();
+    }
+
+    static String turnTimingLine(long elapsedMillis, LocalDateTime completedAt) {
+        Duration elapsed = Duration.ofMillis(elapsedMillis);
+        String duration;
+        if (elapsedMillis < 1000) {
+            duration = elapsedMillis + "ms";
+        } else if (elapsed.toMinutes() > 0) {
+            duration = elapsed.toMinutes() + "m " + elapsed.toSecondsPart() + "s";
+        } else {
+            duration = elapsed.toSeconds() + "s";
+        }
+        return AnsiStyle.thinkingQuote("* Brewed for " + duration + " · done " + completedAt.format(COMPLETION_TIME));
     }
 
     static McpConfigBootstrapResult ensureDefaultMcpConfig(Path userHome) throws IOException {

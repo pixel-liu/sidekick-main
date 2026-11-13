@@ -16,7 +16,6 @@ import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -25,70 +24,47 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BottomStatusBarTest {
 
     @Test
-    void separatesSessionFromEnvironmentAndLastRequestUsage() {
+    void groupsUsageAfterContextOnOneRow() {
         StatusInfo info = StatusInfo.tokens("glm-5.1", 200_000L, 1200L, 1000L, 234L, 100L, "¥0.0123",
                 true, 1500L, "running").withEnvironment("MCP 0/1", "Skill 1/1");
         var lines = BottomStatusBar.formatStatusLines(info, 200);
 
         String session = lines.get(0).toString();
-        String directory = Path.of(System.getProperty("user.dir")).getFileName().toString();
-        assertTrue(session.startsWith("HITL  glm-5.1  ctx 1%  ▏░░░░░░░  (1.2k/200.0k)  running"), session);
-        assertTrue(session.endsWith(directory + " "), session);
-        String details = lines.get(1).toString();
-        assertEquals("in 1.0k|out 234|cache 100|¥0.0123|1.5s|MCP 0/1|1 skill",
-                details.stripTrailing().replaceAll(" {2,}", "|"));
-        int[] gaps = Pattern.compile(" {2,}").matcher(details).results()
-                .mapToInt(gap -> gap.end() - gap.start()).sorted().toArray();
-        assertTrue(gaps[gaps.length - 1] - gaps[0] <= 1, details);
+        assertEquals(1, lines.size());
+        assertTrue(session.startsWith("glm-5.1  ctx 1%  ▏░░░░░░░  (1.2k/200.0k)"
+                + "  in 1.0k  out 234  cache 100  running  ¥0.0123"), session);
+        assertFalse(session.contains(Path.of(System.getProperty("user.dir")).toString()), session);
+        assertFalse(session.contains("1.5s"), session);
+        assertFalse(session.contains("HITL"), session);
+        assertFalse(session.contains("MCP 0/1"), session);
+        assertFalse(session.contains("1 skill"), session);
     }
 
     @Test
     void contextSegmentUsesContextTokensNotUsageTotals() {
         StatusInfo info = StatusInfo.tokens("glm-5.1", 200_000L, 1200L, 51_000L, 2_000L, 0L,
                 null, false, 0L, "idle");
-        var lines = BottomStatusBar.formatStatusLines(info, 200);
+        String line = statusLine(info, 200);
 
-        assertTrue(lines.get(0).toString().contains("1.2k/200.0k"));
-        assertFalse(lines.get(0).toString().contains("53.0k/200.0k"));
-        assertFalse(lines.get(0).toString().contains("idle"));
-        assertTrue(lines.get(1).toString().contains("in 51.0k"));
-        assertTrue(lines.get(1).toString().contains("out 2.0k"));
-        assertTrue(lines.get(1).toString().contains("cache 0"));
+        assertTrue(line.contains("1.2k/200.0k"));
+        assertFalse(line.contains("53.0k/200.0k"));
+        assertFalse(line.contains("idle"));
+        assertTrue(line.contains("in 51.0k  out 2.0k  cache 0"));
     }
 
     @Test
     void narrowStatusKeepsContextAndFitsWideCharacters() {
         StatusInfo info = StatusInfo.idle("超长中文模型名称", 200_000L, false)
                 .withEnvironment("MCP 4/4", "Skill 2/2");
-        var lines = BottomStatusBar.formatStatusLines(info, 22);
-        String session = lines.get(0).toString();
-        assertEquals(22, lines.get(0).columnLength());
-        assertEquals(22, lines.get(1).columnLength());
+        AttributedString line = BottomStatusBar.formatStatusLines(info, 42).get(0);
+        String session = line.toString();
+        assertEquals(42, line.columnLength());
         assertTrue(session.startsWith("超长"), session);
         assertTrue(session.contains("…  ctx 0%  ░"), session);
-        assertFalse(session.contains("YOLO"), session);
+        assertTrue(session.contains("in —  out —  cache —"), session);
 
-        String midWidth = BottomStatusBar.formatStatusLines(info, 46).get(0).toString();
-        String directory = Path.of(System.getProperty("user.dir")).getFileName().toString();
-        String tail = directory.substring(directory.offsetByCodePoints(directory.length(),
-                -Math.min(5, directory.codePointCount(0, directory.length()))));
-        assertTrue(midWidth.endsWith(tail + " "), midWidth);
-        assertTrue(lines.get(1).toString().matches("in — +out — +cache — +"));
-    }
-
-    @Test
-    void detailsLineHidesElapsedWhenZero() {
-        StatusInfo info = new StatusInfo("glm-5.1", 0L, 200_000L, false, 0L);
-        String line = detailsLine(info, 80);
-        assertFalse(line.contains("ms"));
-        assertFalse(line.contains("0s"));
-    }
-
-    @Test
-    void detailsLineHandlesMillisecondElapsed() {
-        StatusInfo info = new StatusInfo("glm-5.1", 0L, 0L, false, 250L);
-        String line = detailsLine(info, 80);
-        assertTrue(line.contains("250ms"), line);
+        String compact = statusLine(info, 20);
+        assertEquals("ctx 0%  I:— O:— C:— ", compact);
     }
 
     @Test
@@ -96,19 +72,20 @@ class BottomStatusBarTest {
         StatusInfo info = StatusInfo.tokens("deepseek-v4-pro", 1_000_000L, 950_000L, 16_100L,
                         437L, 14_300L, null, false, 0L, "idle")
                 .withEnvironment("MCP 5/5", "Skill 3/5");
-        var lines = BottomStatusBar.formatStatusLines(info, 140);
-        assertEquals(2, lines.size());
+        AttributedString line = BottomStatusBar.formatStatusLines(info, 140).get(0);
         AttributedStyle red = AttributedStyle.DEFAULT.foreground(AttributedStyle.BRIGHT | AttributedStyle.RED);
-        assertFalse(lines.get(0).toString().contains("YOLO"));
-        assertFalse(lines.get(0).toString().contains("HITL"));
-        assertSegmentStyle(lines.get(0), "deepseek-v4-pro", AttributedStyle.DEFAULT.foreground(147).bold());
-        assertSegmentStyle(lines.get(0), "ctx 95%", red.bold());
-        assertSegmentStyle(lines.get(0), "███████▋", red.bold());
-        assertSegmentStyle(lines.get(1), "MCP 5/5", AttributedStyle.DEFAULT.foreground(81));
-        assertSegmentStyle(lines.get(1), "3/5 skills", AttributedStyle.DEFAULT.foreground(183));
-        assertSegmentStyle(lines.get(1), "in 16.1k", AttributedStyle.DEFAULT.foreground(153));
-        assertSegmentStyle(lines.get(1), "out 437", AttributedStyle.DEFAULT.foreground(156));
-        assertSegmentStyle(lines.get(1), "cache 14.3k", AttributedStyle.DEFAULT.foreground(213));
+        assertSegmentStyle(line, "deepseek-v4-pro", AttributedStyle.DEFAULT.foreground(147).bold());
+        assertSegmentStyle(line, "ctx 95%", red.bold());
+        assertSegmentStyle(line, "███████▋", red.bold());
+        assertSegmentStyle(line, "in 16.1k", AttributedStyle.DEFAULT.foreground(153));
+        assertSegmentStyle(line, "out 437", AttributedStyle.DEFAULT.foreground(156));
+        assertSegmentStyle(line, "cache 14.3k", AttributedStyle.DEFAULT.foreground(213));
+
+        AttributedString warning = BottomStatusBar.formatStatusLines(
+                StatusInfo.idle("model", 100, 70, true), 120).get(0);
+        AttributedStyle yellow = AttributedStyle.DEFAULT.foreground(AttributedStyle.BRIGHT | AttributedStyle.YELLOW);
+        assertSegmentStyle(warning, "ctx 70%", yellow.bold());
+        assertSegmentStyle(warning, "█████▋", yellow.bold());
     }
 
     @Test
@@ -127,10 +104,8 @@ class BottomStatusBarTest {
 
         bar.update(StatusInfo.tokens("model", 200_000L, 2500L, 2345L, 501L, 0L, "¥0.0200",
                 false, 2000L, "idle"));
-        String narrow = detailsLine(bar.currentStatus(), 32);
-        assertTrue(narrow.contains("in 2.3k"), narrow);
-        assertTrue(narrow.contains("out 501"), narrow);
-        assertTrue(narrow.contains("cache 0"), narrow);
+        String narrow = statusLine(bar.currentStatus(), 42);
+        assertTrue(narrow.contains("in 2.3k  out 501  cache 0"), narrow);
     }
 
     @Test
@@ -170,15 +145,15 @@ class BottomStatusBarTest {
             BottomStatusBar bar = new BottomStatusBar(terminal);
             bar.start();
             bar.update(StatusInfo.idle("glm-5.1", 200_000L, false));
-            assertEquals(2, Status.getStatus(terminal).size());
-            assertTrue(sink.toString(StandardCharsets.UTF_8).contains(AnsiSeq.setScrollRegion(1, 22)));
+            assertEquals(1, Status.getStatus(terminal).size());
+            assertTrue(sink.toString(StandardCharsets.UTF_8).contains(AnsiSeq.setScrollRegion(1, 23)));
 
             sink.reset();
             bar.close();
             assertEquals(0, Status.getStatus(terminal).size());
             String teardown = sink.toString(StandardCharsets.UTF_8);
             assertTrue(teardown.contains(AnsiSeq.setScrollRegion(1, 24)), teardown);
-            assertTrue(teardown.contains(AnsiSeq.moveCursor(23, 1) + AnsiSeq.CLEAR_TO_EOL), teardown);
+            assertTrue(teardown.contains(AnsiSeq.moveCursor(24, 1) + AnsiSeq.CLEAR_TO_EOL), teardown);
             assertFalse(teardown.contains(AnsiSeq.CLEAR_TO_EOS), teardown);
 
             bar.flushNow();
@@ -233,8 +208,8 @@ class BottomStatusBarTest {
         }
     }
 
-    private static String detailsLine(StatusInfo info, int columns) {
-        return BottomStatusBar.formatStatusLines(info, columns).get(1).toString();
+    private static String statusLine(StatusInfo info, int columns) {
+        return BottomStatusBar.formatStatusLines(info, columns).get(0).toString();
     }
 
     private static void assertSegmentStyle(AttributedString line, String segment, AttributedStyle colorStyle) {
