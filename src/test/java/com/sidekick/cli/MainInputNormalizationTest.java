@@ -16,6 +16,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -63,18 +64,26 @@ class MainInputNormalizationTest {
 
         assertTrue(lines.get(0).contains("Sidekick v16.1.0"));
         assertFalse(lines.get(0).contains("π"));
-        assertTrue(lines.get(1).contains("Model auto (model)"));
-        if (AnsiStyle.isEnabled()) {
-            for (String line : lines.subList(0, 4)) {
-                assertTrue(line.matches(".*\u001B\\[97m[^\u001B]+\u001B\\[0m"), line);
-            }
-        }
-        assertTrue(lines.stream().anyMatch(line -> line.contains("Tips for getting started")));
-        assertTrue(lines.stream().anyMatch(line -> line.contains("@path")));
+        assertTrue(lines.get(1).endsWith(AnsiStyle.thinkingQuote("Model ") + AnsiStyle.brightWhite("auto")
+                + AnsiStyle.thinkingQuote(" (model)")));
+        assertTrue(lines.get(0).endsWith(AnsiStyle.thinkingQuote("Sidekick v16.1.0")));
+        assertTrue(lines.get(2).endsWith(AnsiStyle.thinkingQuote("MCP not configured · 0 skills · ReAct")));
+        assertFalse(lines.get(3).contains("ReAct"));
+        assertTrue(lines.get(4).contains(Path.of("").toAbsolutePath().normalize().getFileName().toString()));
+        assertEquals(6, lines.size());
+        assertTrue(lines.stream().noneMatch(line -> line.contains("Tips for getting started") || line.contains("@path")));
         assertTrue(lines.stream().noneMatch(line -> line.contains("for shortcuts")));
         assertTrue(lines.stream().noneMatch(line -> line.contains("────────────────")));
         assertTrue(lines.stream().noneMatch(line -> line.endsWith("║")),
                 "banner should not depend on a padded right border");
+    }
+
+    @Test
+    void turnTimingShowsElapsedAndLocalCompletionTimeInGray() {
+        LocalDateTime completedAt = LocalDateTime.of(2026, 11, 13, 22, 36);
+        assertEquals(AnsiStyle.thinkingQuote("* Brewed for 12s · done 22:36"), Main.turnTimingLine(12_000, completedAt));
+        assertEquals(AnsiStyle.thinkingQuote("* Brewed for 250ms · done 22:36"), Main.turnTimingLine(250, completedAt));
+        assertEquals(AnsiStyle.thinkingQuote("* Brewed for 2m 5s · done 22:36"), Main.turnTimingLine(125_000, completedAt));
     }
 
     @Test
