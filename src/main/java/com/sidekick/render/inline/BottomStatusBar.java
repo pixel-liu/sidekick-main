@@ -117,7 +117,11 @@ public final class BottomStatusBar implements AutoCloseable {
             return;
         }
         int cols = TerminalCapabilities.safeSize(terminal).getColumns();
-        status.update(formatStatusLines(current, cols));
+        // JLine fills the last cell and emits a space to force wrap on terminals without
+        // delayed-wrap support. At the bottom of the screen this can overwrite column one.
+        boolean protectFirstColumn = terminal.getBooleanCapability(InfoCmp.Capability.auto_right_margin)
+                && !terminal.getBooleanCapability(InfoCmp.Capability.eat_newline_glitch);
+        status.update(formatStatusLines(current, cols, protectFirstColumn));
     }
 
     @Override
@@ -159,10 +163,12 @@ public final class BottomStatusBar implements AutoCloseable {
         return next;
     }
 
-    static List<AttributedString> formatStatusLines(StatusInfo info, int cols) {
-        // Keep the last terminal column blank so the status text does not trigger auto-wrap.
-        int contentWidth = Math.max(0, cols - 1);
-        return List.of(fitToColumns(formatSessionLine(info, contentWidth), cols));
+    static List<AttributedString> formatStatusLines(StatusInfo info, int cols, boolean protectFirstColumn) {
+        int leftInset = protectFirstColumn ? 1 : 0;
+        int contentWidth = Math.max(0, cols - leftInset - 1);
+        AttributedStringBuilder line = new AttributedStringBuilder();
+        line.append(" ".repeat(leftInset)).append(formatSessionLine(info, contentWidth));
+        return List.of(fitToColumns(line.toAttributedString(), cols));
     }
 
     private static AttributedString formatSessionLine(StatusInfo info, int cols) {
@@ -177,9 +183,11 @@ public final class BottomStatusBar implements AutoCloseable {
         int percent = (int) Math.round(ratio * 100);
         String contextLabel = "ctx " + percent + "%";
 
-        AttributedString usage = formatUsage(info, cols - contextLabel.length() - GAP.length());
-        int usageWidth = usage.length() == 0 ? 0 : usage.columnLength() + GAP.length();
-        int room = cols - contextLabel.length() - usageWidth;
+        AttributedString usage = formatUsage(info, cols - contextLabel.length() - 1);
+        int groupGap = usage.length() == 0 ? 0
+                : Math.min(GAP.length(), cols - contextLabel.length() - usage.columnLength());
+        int leftWidth = cols - usage.columnLength() - groupGap;
+        int room = leftWidth - contextLabel.length();
         int minModel = Math.min(MIN_MODEL_WIDTH, new AttributedString(model).columnLength()) + GAP.length();
         int minBar = 1 + GAP.length();
         int barWidth = Math.min(BAR_WIDTH, Math.max(0, room - minModel - GAP.length()));
@@ -204,11 +212,16 @@ public final class BottomStatusBar implements AutoCloseable {
         appendField(line, context.toAttributedString(), cols);
 
         appendField(line, "(" + formatTokens(total) + "/" + formatTokens(window) + ")",
-                CONTEXT_SIZE_STYLE, cols - usageWidth);
-        appendField(line, usage, cols);
-        appendField(line, phase, PHASE_STYLE, cols);
+                CONTEXT_SIZE_STYLE, leftWidth);
+        appendField(line, phase, PHASE_STYLE, leftWidth);
+
+        AttributedStringBuilder usageGroup = new AttributedStringBuilder().append(usage);
         if (info.estimatedCost() != null && !info.estimatedCost().isBlank()) {
-            appendField(line, info.estimatedCost().trim(), COST_STYLE, cols);
+            appendField(usageGroup, info.estimatedCost().trim(), COST_STYLE, cols - line.columnLength() - groupGap);
+        }
+        if (usageGroup.length() > 0) {
+            line.append(" ".repeat(cols - line.columnLength() - usageGroup.columnLength()));
+            line.append(usageGroup.toAttributedString());
         }
         return line.toAttributedString();
     }
