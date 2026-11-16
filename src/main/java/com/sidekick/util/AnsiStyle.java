@@ -54,13 +54,9 @@ public final class AnsiStyle {
         return wrap(THINKING_GRAY, text);
     }
 
-    /** 思考区及审批按键使用的浅灰前景色。 */
+    /** 思考、工具信息及审批按键使用的浅灰前景色。 */
     public static String readableGray(String text) {
         return wrap(THINKING_CONTENT_GRAY, text);
-    }
-
-    public static String thinkingContentTitle(String text) {
-        return wrap(ITALIC + THINKING_CONTENT_GRAY, text);
     }
 
     public static String userMessageBlock(String text, int columns) {

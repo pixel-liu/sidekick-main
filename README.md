@@ -130,7 +130,7 @@ ReAct 日志中的 `ReAct LLM timing` 按请求记录准备时间、收到首段
 
 ## 终端交互
 
-默认行内界面在底部以浅灰色显示实时思考。答复开始时，主屏只保留 `Thinking . . . >`。按 Ctrl+O 打开本轮最近的思考、工具调用或代码块，方向键滚动，按 q 返回原对话和输入草稿。查看页需要终端支持备用屏幕。
+默认行内界面在底部以浅灰色显示实时思考。一条 ReAct 提问的多次模型思考共用一个 `Thinking . . . >`。按 Ctrl+O 在当前页面的输入框下方展开完整思考，再按一次收起。长内容可用 PgUp/PgDn 翻页。按 Alt+O 查看或收起最近的工具调用或代码块。
 
 MCP 配置文件不存在时会创建默认 Chrome DevTools 配置。自定义 MCP server 可使用 stdio `command` 或 Streamable HTTP `url`；配置中的 `${PROJECT_DIR}`、`${HOME}` 和环境变量会在启动时展开。
 

@@ -597,7 +597,7 @@ public class Main {
             reactAgent.getToolRegistry().setWriteFileObserver(
                     (path, ba) -> renderer.appendDiff(path, ba[0], ba[1]));
 
-            // Day 3：inline 模式绑 Ctrl+O 到 BlockRegistry.toggleLast 实现折叠块展开/收起
+            // 行内思考和工具详情共用输入框旁的可折叠区域。
             if (renderer instanceof InlineRenderer inline) {
                 bindCtrlOToFoldableBlocks(lineReader, inline);
             }
@@ -1970,16 +1970,21 @@ public class Main {
             return;
         }
         lineReader.getWidgets().put("Sidekick-toggle-foldable", () -> {
-            inline.openLastBlock();
-            lineReader.callWidget(LineReader.REDISPLAY);
+            inline.toggleBlockPreview(true);
+            return true;
+        });
+        lineReader.getWidgets().put("Sidekick-toggle-tool-block", () -> {
+            inline.toggleBlockPreview(false);
             return true;
         });
         Reference ref = new Reference("Sidekick-toggle-foldable");
+        Reference toolRef = new Reference("Sidekick-toggle-tool-block");
         String ctrlO = String.valueOf((char) 15);  // Ctrl+O
         for (String mapName : new String[]{LineReader.MAIN, LineReader.EMACS, LineReader.VIINS}) {
             KeyMap<org.jline.reader.Binding> map = lineReader.getKeyMaps().get(mapName);
             if (map != null) {
                 map.bind(ref, ctrlO);
+                map.bind(toolRef, "\u001Bo", "\u001BO");
             }
         }
     }

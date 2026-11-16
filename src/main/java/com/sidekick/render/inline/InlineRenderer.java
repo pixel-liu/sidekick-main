@@ -7,21 +7,14 @@ import com.sidekick.render.PlainRenderer;
 import com.sidekick.render.Renderer;
 import com.sidekick.render.StatusInfo;
 import com.sidekick.util.AnsiStyle;
-import org.jline.builtins.Less;
-import org.jline.builtins.Source;
 import org.jline.reader.LineReader;
 import org.jline.reader.Widget;
 import org.jline.terminal.Terminal;
-import org.jline.utils.InfoCmp.Capability;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.jline.utils.AttributedString;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -36,7 +29,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class InlineRenderer implements Renderer {
 
-    private static final Logger log = LoggerFactory.getLogger(InlineRenderer.class);
     private final Terminal terminal;
     private final PlainRenderer fallback;
     private final BottomStatusBar statusBar;
@@ -44,6 +36,7 @@ public final class InlineRenderer implements Renderer {
     private final PrintStream stream;
     private final PrintStream out;
     private final Object transcriptLock = new Object();
+    private final StringBuilder turnThinking = new StringBuilder();
     private final InlineActivityDisplay activityDisplay;
     private final AtomicBoolean startupScreenPrinted = new AtomicBoolean(true);
     private volatile LineReader lineReader;
@@ -84,6 +77,9 @@ public final class InlineRenderer implements Renderer {
             codeBodyLines.clear();
             codeLanguage = "";
             codeHeaderLine = null;
+            synchronized (turnThinking) {
+                turnThinking.setLength(0);
+            }
             blockRegistry.clear();
         }
     }
@@ -192,12 +188,17 @@ public final class InlineRenderer implements Renderer {
             return;
         }
 
-        List<String> expandedLines = new ArrayList<>();
-        expandedLines.add(AnsiStyle.thinkingContentTitle("Thinking . . ."));
-        for (String line : thinking.split("\\R", -1)) {
-            expandedLines.add(AnsiStyle.readableGray("│ " + cleanThinkingLine(line)));
+        boolean first;
+        synchronized (turnThinking) {
+            first = turnThinking.isEmpty();
+            if (!first) {
+                turnThinking.append("\n\n");
+            }
+            turnThinking.append(thinking.strip());
         }
-        emitBlock(new FoldableBlock(out, AnsiStyle.readableGray("Thinking . . . >"), expandedLines));
+        if (first) {
+            emit(AnsiStyle.readableGray("Thinking . . . >") + System.lineSeparator());
+        }
     }
 
     static String cleanThinkingLine(String line) {
@@ -325,27 +326,27 @@ public final class InlineRenderer implements Renderer {
         return terminal;
     }
 
-    /** Open only the most recent block in JLine's alternate-screen pager. */
-    public boolean openLastBlock() {
-        FoldableBlock block = blockRegistry.peekLast();
-        if (closed || block == null || terminal == null
-                || terminal.getStringCapability(Capability.enter_ca_mode) == null
-                || terminal.getStringCapability(Capability.exit_ca_mode) == null) {
+    /** Ctrl+O prefers the turn's reasoning. Alt+O always targets the latest tool or code block. */
+    public boolean toggleBlockPreview(boolean preferThinking) {
+        if (closed || !(lineReader instanceof ChatLineReader reader)) {
             return false;
         }
-        String preview = "↑↓ 滚动 · q 返回对话\n\n" + String.join("\n", block.expandedLines()) + "\n";
-        Less pager = new Less(terminal, Path.of(""));
-        pager.noKeypad = true;
-        try {
-            pager.run(new Source.InputStreamSource(
-                    new ByteArrayInputStream(preview.getBytes(StandardCharsets.UTF_8)), true, "Sidekick"));
-            return true;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        } catch (IOException e) {
-            log.warn("Unable to open inline block", e);
+        String thinking;
+        synchronized (turnThinking) {
+            thinking = preferThinking ? turnThinking.toString() : "";
         }
-        return false;
+        if (!thinking.isEmpty()) {
+            List<AttributedString> lines = thinking.lines()
+                    .map(line -> new AttributedString("│ " + cleanThinkingLine(line), InlineActivityDisplay.THINKING_STYLE))
+                    .toList();
+            return reader.togglePreview("思考正文", "Ctrl+O", lines);
+        }
+        FoldableBlock block = blockRegistry.peekLast();
+        if (block == null) {
+            return false;
+        }
+        return reader.togglePreview("详情", preferThinking ? "Ctrl+O" : "Alt+O",
+                block.expandedLines().stream().map(AttributedString::fromAnsi).toList());
     }
 
     private PrintStream createTranscriptStream(PrintStream delegate) {
@@ -412,8 +413,8 @@ public final class InlineRenderer implements Renderer {
                 inCodeBlock = false;
 
                 String label = codeLanguage.isEmpty() ? "code" : "code: " + codeLanguage;
-                String collapsedHeader = AnsiStyle.subtle(
-                        "⏵ " + label + " (" + bodyLineCount + " 行, ctrl+o to expand)");
+                String collapsedHeader = AnsiStyle.readableGray(
+                        "⏵ " + label + " (" + bodyLineCount + " 行, alt+o to expand)");
 
                 List<String> expandedLines = new ArrayList<>();
                 expandedLines.add(stripTrailingNewline(codeHeaderLine));

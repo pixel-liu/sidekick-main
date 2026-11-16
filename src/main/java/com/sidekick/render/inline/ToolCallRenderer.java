@@ -14,7 +14,7 @@ import java.util.Map;
 /**
  * 把一组工具调用渲染成 {@link FoldableBlock}。
  *
- * <p>折叠态：{@code ⏵ 读取 3 个文件 (ctrl+o to expand)}<br>
+ * <p>折叠态：{@code ⏵ 读取 3 个文件 (alt+o to expand)}<br>
  * 展开态：原 PlainRenderer 风格的工具标签 + 缩进的关键参数 + 折叠提示。
  *
  * <p>每次调用产生一个 block 并立即渲染折叠态，注册到 {@link BlockRegistry}。
@@ -56,11 +56,11 @@ public final class ToolCallRenderer {
         if (grouped.size() == 1) {
             var entry = grouped.entrySet().iterator().next();
             String label = toolCollapsedLabel(entry.getKey(), entry.getValue());
-            return AnsiStyle.subtle("⏵ " + stripPrefixIcon(label) + " (ctrl+o to expand)");
+            return AnsiStyle.readableGray("⏵ " + stripPrefixIcon(label) + " (alt+o to expand)");
         }
         int totalCalls = grouped.values().stream().mapToInt(List::size).sum();
-        return AnsiStyle.subtle("⏵ " + grouped.size() + " 组工具调用 / "
-                + totalCalls + " 次 (ctrl+o to expand)");
+        return AnsiStyle.readableGray("⏵ " + grouped.size() + " 组工具调用 / "
+                + totalCalls + " 次 (alt+o to expand)");
     }
 
     static List<String> expandedLines(Map<String, List<LlmClient.ToolCall>> grouped) {
@@ -68,11 +68,11 @@ public final class ToolCallRenderer {
         for (var group : grouped.entrySet()) {
             String toolName = group.getKey();
             List<LlmClient.ToolCall> calls = group.getValue();
-            lines.add(AnsiStyle.subtle("  " + toolLabel(toolName, calls.size())));
+            lines.add(AnsiStyle.readableGray("  " + toolLabel(toolName, calls.size())));
             for (LlmClient.ToolCall tc : calls) {
                 String detail = extractKeyParam(toolName, tc.function().arguments());
                 if (!detail.isEmpty()) {
-                    lines.add(AnsiStyle.subtle("    └ " + detail));
+                    lines.add(AnsiStyle.readableGray("    └ " + detail));
                 }
             }
         }

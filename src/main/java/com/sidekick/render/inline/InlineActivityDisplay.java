@@ -25,10 +25,10 @@ final class InlineActivityDisplay implements AutoCloseable {
     private static final int MAX_REASONING_ROWS = 4;
     private static final String[] SPINNER_FRAMES = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
     private static final AttributedStyle STATUS_STYLE = AttributedStyle.DEFAULT.italic();
-    private static final AttributedStyle QUOTE_STYLE = AnsiStyle.isEnabled()
+    static final AttributedStyle THINKING_STYLE = AnsiStyle.isEnabled()
             ? AttributedStyle.DEFAULT.foreground(AnsiStyle.THINKING_CONTENT_GRAY_INDEX)
             : AttributedStyle.DEFAULT;
-    private static final AttributedStyle THINKING_TITLE_STYLE = QUOTE_STYLE.italic();
+    private static final AttributedStyle THINKING_TITLE_STYLE = THINKING_STYLE.italic();
 
     private final Terminal terminal;
     private final BottomStatusBar statusBar;
@@ -185,7 +185,7 @@ final class InlineActivityDisplay implements AutoCloseable {
             var wrapped = new AttributedString(quoteLines.get(i))
                     .columnSplitLength(quoteWidth, false, true, terminal);
             for (int j = wrapped.size() - 1; j >= 0 && preview.size() < maxRows; j--) {
-                preview.addFirst(fit("  │ " + wrapped.get(j), cols, QUOTE_STYLE));
+                preview.addFirst(fit("  │ " + wrapped.get(j), cols, THINKING_STYLE));
             }
         }
         lines.addAll(preview);

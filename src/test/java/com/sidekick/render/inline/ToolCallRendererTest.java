@@ -22,7 +22,7 @@ class ToolCallRendererTest {
         String header = ToolCallRenderer.collapsedHeader(grouped);
         assertTrue(header.contains("⏵"), header);
         assertTrue(header.contains("读取 2 个文件"), header);
-        assertTrue(header.contains("ctrl+o"), header);
+        assertTrue(header.contains("alt+o"), header);
     }
 
     @Test

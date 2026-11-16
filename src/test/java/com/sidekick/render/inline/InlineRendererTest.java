@@ -178,18 +178,19 @@ class InlineRendererTest {
     }
 
     @Test
-    void pagerShowsToolDetailsWithoutReplayingConversation() throws Exception {
+    void inlinePreviewShowsToolDetailsWithoutReplayingConversation() throws Exception {
         ByteArrayOutputStream screen = new ByteArrayOutputStream();
         ByteArrayOutputStream transcript = new ByteArrayOutputStream();
-        try (Terminal terminal = viewTerminal("q", screen);
+        try (Terminal terminal = viewTerminal("\u001Bo\n", screen);
              InlineRenderer renderer = new InlineRenderer(terminal, sink(transcript))) {
+            ChatLineReader reader = bindPreview(renderer);
             renderer.beginTurn();
             renderer.stream().println("before");
             renderer.appendToolCalls(List.of(tc("read_file", "{\"path\":\"README.md\"}")));
             renderer.stream().println("after");
             String original = transcript.toString(StandardCharsets.UTF_8);
 
-            assertTrue(renderer.openLastBlock());
+            assertEquals("", reader.readChatLine("❯ "));
 
             assertEquals(original, transcript.toString(StandardCharsets.UTF_8));
             assertTrue(screen.toString(StandardCharsets.UTF_8).contains("README.md"));
@@ -265,7 +266,7 @@ class InlineRendererTest {
             assertTrue(emitted.contains("⏵"), "应该出现折叠箭头: " + emitted);
             assertTrue(emitted.contains("code: java"), emitted);
             assertTrue(emitted.contains("2 行"), "应统计 body 行数: " + emitted);
-            assertTrue(emitted.contains("ctrl+o"), emitted);
+            assertTrue(emitted.contains("alt+o"), emitted);
             // body 行不应直接显示在 delegate 上（被吞掉了）—— 验证：last occurrence 不包含 "public class"
             // 但因为 delegate.print(line) 还是会先写 body？让我们再确认：检查 final state。
             // 注意：进入代码块后 body 走 codeBodyLines 缓冲，不写 delegate；end 触发 move-up + clear-to-eos
@@ -278,51 +279,67 @@ class InlineRendererTest {
     }
 
     @Test
-    void pagerShowsCodeBody() throws Exception {
+    void inlinePreviewShowsCodeBody() throws Exception {
         ByteArrayOutputStream screen = new ByteArrayOutputStream();
-        try (Terminal terminal = viewTerminal("q", screen);
+        try (Terminal terminal = viewTerminal("\u001Bo\n", screen);
              InlineRenderer renderer = new InlineRenderer(terminal, sink(new ByteArrayOutputStream()))) {
+            ChatLineReader reader = bindPreview(renderer);
             renderer.stream().println("┌─ code: bash");
             renderer.stream().println("    echo hi");
             renderer.stream().println("└─ end");
 
-            assertTrue(renderer.openLastBlock());
+            assertEquals("", reader.readChatLine("❯ "));
             assertTrue(screen.toString(StandardCharsets.UTF_8).contains("echo hi"));
         }
     }
 
     @Test
-    void openingThinkingTwiceKeepsLongAnswerAndDraftInPlace() throws Exception {
+    void multipleModelCallsShareOneThinkingBlockAndToggleInlineWithoutReplayingAnswer() throws Exception {
         ByteArrayOutputStream screen = new ByteArrayOutputStream();
         ByteArrayOutputStream transcript = new ByteArrayOutputStream();
-        try (Terminal terminal = viewTerminal("draft\u000Fq\u000Fq\n", screen);
+        try (Terminal terminal = viewTerminal("draft\u000F\u001B[6~\u000F\u000F\u000F\n", screen);
              InlineRenderer renderer = new InlineRenderer(terminal, sink(transcript))) {
-            ChatLineReader reader = renderer.createLineReader();
-            renderer.bindLineReader(reader);
-            reader.getWidgets().put("preview-block", renderer::openLastBlock);
-            reader.getKeyMaps().get(LineReader.MAIN).bind(new Reference("preview-block"), "\u000F");
+            ChatLineReader reader = bindPreview(renderer);
             renderer.start();
             renderer.updateStatus(StatusInfo.idle("test-model", 10_000, false));
+            renderer.beginTurn();
+            renderer.printSubmittedPrompt("输入问题");
+            renderer.beginThinking("Thinking");
+            renderer.appendThinking("第一次思考\n" + "一段需要分页的较长正文\n".repeat(9));
+            renderer.collapseThinking();
             renderer.appendToolCalls(List.of(tc("read_file", "{\"path\":\"old-tool.txt\"}")));
             renderer.beginThinking("Thinking");
-            renderer.appendThinking("思考细节");
+            renderer.appendThinking("第二次思考");
             renderer.collapseThinking();
+            renderer.appendCollapsedThinking("补充思考");
             renderer.stream().print("FINAL_ANSWER\n".repeat(80));
 
             String original = transcript.toString(StandardCharsets.UTF_8);
-            assertTrue(original.contains("Thinking . . . >"), original);
-            assertFalse(original.contains("思考细节"), original);
+            assertEquals(1, original.split("Thinking \\. \\. \\. >", -1).length - 1, original);
+            assertTrue(original.lines().skip(1).findFirst().orElseThrow().contains("Thinking . . . >"));
+            assertFalse(original.contains("第一次思考"), original);
             screen.reset();
             assertEquals("draft", reader.readChatLine("❯ "));
 
             String frames = screen.toString(StandardCharsets.UTF_8);
-            assertEquals(2, frames.split("\\Q\u001B[?1049h\\E", -1).length - 1, frames);
-            assertEquals(2, frames.split("\\Q\u001B[?1049l\\E", -1).length - 1, frames);
-            assertTrue(frames.contains("思考细节"), frames);
+            assertFalse(frames.contains("\u001B[?1049h"), frames);
+            assertTrue(frames.contains("第一次思考"), frames);
+            assertTrue(frames.contains("第二次思考"), frames);
+            assertTrue(frames.contains("补充思考"), frames);
             assertFalse(frames.contains("FINAL_ANSWER"), frames);
             assertFalse(frames.contains("old-tool.txt"), frames);
             assertEquals(original, transcript.toString(StandardCharsets.UTF_8));
         }
+    }
+
+    private static ChatLineReader bindPreview(InlineRenderer renderer) {
+        ChatLineReader reader = renderer.createLineReader();
+        renderer.bindLineReader(reader);
+        reader.getWidgets().put("preview-thinking", () -> renderer.toggleBlockPreview(true));
+        reader.getWidgets().put("preview-tool", () -> renderer.toggleBlockPreview(false));
+        reader.getKeyMaps().get(LineReader.MAIN).bind(new Reference("preview-thinking"), "\u000F");
+        reader.getKeyMaps().get(LineReader.MAIN).bind(new Reference("preview-tool"), "\u001Bo");
+        return reader;
     }
 
     private static Terminal viewTerminal(String keys, ByteArrayOutputStream screen) throws IOException {
