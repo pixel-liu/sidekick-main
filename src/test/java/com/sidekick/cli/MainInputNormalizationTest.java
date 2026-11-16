@@ -70,7 +70,9 @@ class MainInputNormalizationTest {
         assertTrue(lines.get(2).endsWith(AnsiStyle.thinkingQuote("MCP not configured · 0 skills · ReAct")));
         assertFalse(lines.get(3).contains("ReAct"));
         assertTrue(lines.get(4).contains(Path.of("").toAbsolutePath().normalize().getFileName().toString()));
-        assertEquals(6, lines.size());
+        assertEquals(8, lines.size());
+        assertEquals("", lines.get(6));
+        assertEquals("", lines.get(7));
         assertTrue(lines.stream().noneMatch(line -> line.contains("Tips for getting started") || line.contains("@path")));
         assertTrue(lines.stream().noneMatch(line -> line.contains("for shortcuts")));
         assertTrue(lines.stream().noneMatch(line -> line.contains("────────────────")));

@@ -103,6 +103,7 @@ import java.util.regex.Pattern;
  */
 public class Main {
     private static final String VERSION = "16.1.0";
+    private static final int STARTUP_INPUT_GAP_ROWS = 2;
     private static final String ENV_FILE = ".env";
     private static final String LOG_DIR_PROPERTY = "Sidekick.log.dir";
     private static final String LOG_LEVEL_PROPERTY = "Sidekick.log.level";
@@ -3025,6 +3026,10 @@ public class Main {
         if (info.note() != null && !info.note().isBlank()) {
             lines.add("");
             lines.add(AnsiStyle.subtle(info.note().replace('\n', ' ')));
+        }
+        // Keep the banner as a distinct welcome region before JLine draws the chat frame.
+        for (int row = 0; row < STARTUP_INPUT_GAP_ROWS; row++) {
+            lines.add("");
         }
         return lines;
     }
