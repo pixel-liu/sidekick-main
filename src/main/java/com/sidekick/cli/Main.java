@@ -475,7 +475,7 @@ public class Main {
         try (Terminal terminal = TerminalBuilder.builder().system(true).dumb(true).build();
              Renderer renderer = RendererFactory.create(RendererFactory.resolveMode(), terminal)) {
             refreshTerminalColumns(terminal);
-            TerminalHitlHandler terminalHitlHandler = new TerminalHitlHandler(true);
+            TerminalHitlHandler terminalHitlHandler = new TerminalHitlHandler(false);
             SwitchableHitlHandler hitlHandler = new SwitchableHitlHandler(terminalHitlHandler);
             HitlToolRegistry hitlToolRegistry = new HitlToolRegistry(hitlHandler);
             BrowserSession browserSession = new BrowserSession();

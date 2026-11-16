@@ -111,7 +111,7 @@ java -jar target/Sidekick-1.0-SNAPSHOT.jar
 
 Agent 可使用 `read_file`、`write_file`、`list_dir`、`glob_files`、`grep_code`、`execute_command`、`search_code`、`web_search`、`web_fetch` 和动态注册的 `mcp__{server}__{tool}` 工具。精确代码定位优先 `glob_files`、`grep_code` 与 `read_file`；`search_code` 用于语义辅助。
 
-文件和代码检索工具只能访问项目根目录内的路径。`execute_command` 默认 60 秒超时，超时会终止完整进程树，并预先拒绝高风险命令。交互会话默认开启 HITL，写文件、执行命令、创建项目等危险工具需要人工确认；可用 `/hitl off` 在当前会话关闭。审计日志写入 `~/.sidekick/audit/`。
+文件和代码检索工具只能访问项目根目录内的路径。`execute_command` 默认 60 秒超时，超时会终止完整进程树，并预先拒绝高风险命令。新交互会话默认关闭 HITL。用 `/hitl` 查看当前状态，用 `/hitl on` 开启本次会话的危险工具人工审批。审计日志写入 `~/.sidekick/audit/`。
 
 ## 配置与数据位置
 

@@ -62,5 +62,5 @@
 - `write_file` 单文件 5MB 上限。
 - `execute_command` 禁止 `sudo`、`rm -rf` 全盘或用户目录、`mkfs`、`dd of=/dev`、fork bomb、`curl|sh`、`find /`、`chmod 777 /`、`shutdown`。
 - 被策略拒绝的工具调用（结果以 `🛡️ 策略拒绝` 开头）不要原样重试，改用项目内相对路径或更安全的命令。
-- MCP 工具来自外部 server，默认会触发 HITL 审批与审计；除非任务确实需要该 server 能力，否则优先使用内置工具。
+- MCP 工具来自外部 server，调用受审计，启用 HITL 时可能需要人工审批。任务需要该 server 的能力时再使用 MCP 工具，日常操作优先使用内置工具。
 - `revert_turn` 会批量回写工作区文件，只在需要撤销错误改动时使用。
