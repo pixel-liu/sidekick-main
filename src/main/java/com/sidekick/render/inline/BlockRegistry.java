@@ -34,15 +34,6 @@ public final class BlockRegistry {
         return last.toggle();
     }
 
-    /** Toggle 队尾块的内存态，由 transcript 重绘负责真正输出。 */
-    public synchronized boolean toggleLastForRedraw() {
-        FoldableBlock last = blocks.peekLast();
-        if (last == null) {
-            return false;
-        }
-        return last.toggleForRedraw();
-    }
-
     /** 后续普通输出已经出现，所有现存块都不能再做原地覆盖重绘。 */
     public synchronized void freezeAll() {
         for (FoldableBlock block : blocks) {
@@ -60,7 +51,7 @@ public final class BlockRegistry {
         return blocks.size();
     }
 
-    /** 测试可见：当前队尾块。 */
+    /** 当前查看页使用的最近折叠块。 */
     synchronized FoldableBlock peekLast() {
         return blocks.peekLast();
     }

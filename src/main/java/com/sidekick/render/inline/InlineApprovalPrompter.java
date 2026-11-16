@@ -53,8 +53,8 @@ public final class InlineApprovalPrompter {
 
         for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
             String optionsLine = sensitive
-                    ? AnsiStyle.subtle("[y] approve  [n] reject  [s] skip  [m] modify")
-                    : AnsiStyle.subtle("[y] approve  [a] all  [n] reject  [s] skip  [m] modify");
+                    ? AnsiStyle.readableGray("[y] approve  [n] reject  [s] skip  [m] modify")
+                    : AnsiStyle.readableGray("[y] approve  [a] all  [n] reject  [s] skip  [m] modify");
             out.print("> " + optionsLine + " ");
             out.flush();
 
@@ -74,7 +74,7 @@ public final class InlineApprovalPrompter {
                 }
                 case 'a' -> {
                     if (sensitive) {
-                        out.println(AnsiStyle.subtle("  敏感操作不支持全部放行，请选 y/n/s/m"));
+                        out.println(AnsiStyle.readableGray("  敏感操作不支持全部放行，请选 y/n/s/m"));
                         continue;
                     }
                     return promptApproveAllScope(request);
@@ -91,10 +91,10 @@ public final class InlineApprovalPrompter {
                         return modified;
                     }
                 }
-                default -> out.println(AnsiStyle.subtle("  ❓ 未识别按键 '" + ch + "'，重新选择"));
+                default -> out.println(AnsiStyle.readableGray("  ❓ 未识别按键 '" + ch + "'，重新选择"));
             }
         }
-        out.println(AnsiStyle.subtle("  连续多次无效输入，保守处理为拒绝"));
+        out.println(AnsiStyle.readableGray("  连续多次无效输入，保守处理为拒绝"));
         return ApprovalResult.reject("连续多次无效输入");
     }
 
@@ -171,7 +171,7 @@ public final class InlineApprovalPrompter {
         try {
             JSON.readTree(trimmed);
         } catch (Exception e) {
-            out.println(AnsiStyle.subtle("  ❌ 非法 JSON: " + e.getMessage()));
+            out.println(AnsiStyle.readableGray("  ❌ 非法 JSON: " + e.getMessage()));
             return null;
         }
         return ApprovalResult.modify(trimmed);

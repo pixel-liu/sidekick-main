@@ -275,11 +275,19 @@ public class Agent {
                     log.debug("Assistant answer preview: {}", preview(response.content(), 500));
                 }
 
+                if (streamRenderer.hasThinkingPanel()) {
+                    boolean answerStreamed = streamRenderer.contentStarted;
+                    streamRenderer.finish();
+                    if (!answerStreamed && !streamRenderer.reasoningStarted && renderer().rendersReasoning()) {
+                        renderer().appendCollapsedThinking(response.reasoningContent());
+                    }
+                    return answerStreamed && !returnFinalResponseWhenStreamed
+                            ? "" : (response.content() == null ? "" : response.content().trim());
+                }
                 if (streamRenderer.hasStreamedOutput()) {
                     streamRenderer.finish();
                     return returnFinalResponseWhenStreamed ? (response.content() == null ? "" : response.content().trim()) : "";
                 }
-                streamRenderer.clearThinkingPanel();
                 return formatUserFacingResponse(reasoningTranscript.toString(), response.content());
 
             } catch (IOException e) {
@@ -853,13 +861,12 @@ public class Agent {
      * 2. 仅空白的 reasoning delta 不触发思考区。
      * 3. content 一出现就收尾 reasoning 区，用低调标记进入正文并流式输出 content。
      * 4. 如果 content 启动之后又收到 reasoning（服务器把思考内容追加在答案之后），
-     *    缓冲到 lateReasoning，最终在 finish() 用"🧠 补充思考"标题独立展示，不会污染回复区
+     *    缓冲到 lateReasoning，在本次模型调用结束时独立展示。
      */
     private static final class StreamRenderer implements LlmClient.StreamListener {
         private final Renderer renderer;
         private final PrintStream boundOut;  // null 表示延迟读取 System.out（保持旧测试兼容）
         private final StringBuilder pendingReasoning = new StringBuilder();
-        private final StringBuilder visibleReasoning = new StringBuilder();
         private final StringBuilder lateReasoning = new StringBuilder();
         private TerminalMarkdownRenderer reasoningRenderer;
         private TerminalMarkdownRenderer contentRenderer;
@@ -920,13 +927,6 @@ public class Agent {
             }
         }
 
-        private void clearThinkingPanel() {
-            if (hasThinkingPanel()) {
-                renderer.endThinking();
-                pendingReasoning.setLength(0);
-            }
-        }
-
         @Override
         public void onReasoningDelta(String delta) {
             if (delta == null || delta.isEmpty()) {
@@ -943,7 +943,6 @@ public class Agent {
                 lateReasoning.append(delta);
                 return;
             }
-            visibleReasoning.append(delta);
             if (hasThinkingPanel()) {
                 pendingReasoning.append(delta);
                 if (pendingReasoning.toString().isBlank()) {
@@ -1034,18 +1033,8 @@ public class Agent {
             if (renderer != null) {
                 renderer.finishAssistantContent();
             }
-            String late = lateReasoning.toString().trim();
-            if (rendersReasoning() && !late.isEmpty()) {
-                out().println();
-                out().println(AnsiStyle.heading("🧠 补充思考"));
-                TerminalMarkdownRenderer r = newMarkdownRenderer();
-                r.append(late);
-                r.finish();
-                lateReasoning.setLength(0);
-                streamedOutput = true;
-            }
+            finishLateReasoning();
             pendingReasoning.setLength(0);
-            visibleReasoning.setLength(0);
             reasoningStarted = false;
             contentStarted = false;
             if (streamedOutput) {
@@ -1068,19 +1057,28 @@ public class Agent {
             if (renderer != null) {
                 renderer.finishAssistantContent();
             }
-            String late = lateReasoning.toString().trim();
-            if (rendersReasoning() && !late.isEmpty()) {
-                out().println();
-                out().println(AnsiStyle.heading("🧠 补充思考"));
-                TerminalMarkdownRenderer r = newMarkdownRenderer();
-                r.append(late);
-                r.finish();
-                lateReasoning.setLength(0);
-                streamedOutput = true;
-            }
+            finishLateReasoning();
             if (streamedOutput) {
                 out().println();
             }
+        }
+
+        private void finishLateReasoning() {
+            String late = lateReasoning.toString();
+            lateReasoning.setLength(0);
+            if (!rendersReasoning() || late.isBlank()) {
+                return;
+            }
+            if (hasThinkingPanel()) {
+                renderer.appendCollapsedThinking(late);
+            } else {
+                out().println();
+                out().println(AnsiStyle.heading("🧠 补充思考"));
+                TerminalMarkdownRenderer r = newMarkdownRenderer();
+                r.append(late.trim());
+                r.finish();
+            }
+            streamedOutput = true;
         }
 
         private boolean containsLineBreak(CharSequence content) {
@@ -1123,7 +1121,7 @@ public class Agent {
             }
             renderer.collapseThinking();
             pendingReasoning.setLength(0);
-            if (!visibleReasoning.isEmpty()) {
+            if (reasoningStarted) {
                 streamedOutput = true;
             }
         }

@@ -4,13 +4,13 @@ import com.sidekick.render.StatusInfo;
 import com.sidekick.util.AnsiStyle;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
+import org.jline.terminal.impl.DumbTerminal;
+import org.jline.utils.AttributedString;
+import org.jline.utils.Status;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 
 import java.io.ByteArrayOutputStream;
-import java.io.OutputStreamWriter;
-import java.io.PrintStream;
-import java.io.PrintWriter;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -20,83 +20,38 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class InlineActivityDisplayTest {
 
     @Test
-    void thinkingPanelKeepsStatusOutOfLiveArea() throws Exception {
-        ByteArrayOutputStream terminalSink = new ByteArrayOutputStream();
-        Terminal terminal = mockAnsiTerminal(terminalSink);
-        BottomStatusBar statusBar = new BottomStatusBar(terminal,
-                new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
-        statusBar.start();
-        statusBar.update(StatusInfo.tokens("glm-5.1", 200_000L, 1234L, 1234L, 567L, 0L,
-                null, false, 3200L, "thinking"));
-
-        try (InlineActivityDisplay display = new InlineActivityDisplay(terminal,
-                new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8),
-                statusBar)) {
+    void wrappedThinkingLivesInReservedRowsAndCollapseClearsThem() throws Exception {
+        ByteArrayOutputStream screen = new ByteArrayOutputStream();
+        try (Terminal terminal = new DumbTerminal("test", "xterm-256color",
+                InputStream.nullInputStream(), screen, StandardCharsets.UTF_8);
+             BottomStatusBar dock = new BottomStatusBar(terminal);
+             InlineActivityDisplay display = new InlineActivityDisplay(terminal, dock)) {
+            terminal.setSize(new Size(32, 7));
+            dock.start();
+            dock.update(StatusInfo.idle("test-model", 10_000, false));
             display.begin("Thinking");
-            display.appendThinking("trying to read file");
-            terminal.writer().flush();
+            screen.reset();
+            String reasoning = "起始".repeat(2300) + "\n末尾".repeat(30);
+            display.appendThinking(reasoning);
+
+            Status status = Status.getStatus(terminal);
+            assertEquals(5, status.size());
+            String rendered = screen.toString(StandardCharsets.UTF_8);
+            assertTrue(rendered.contains("末尾"), rendered);
+            if (AnsiStyle.isEnabled()) {
+                AttributedString gray = AttributedString.fromAnsi(AnsiStyle.readableGray("末尾"));
+                assertTrue(rendered.contains(gray.toAnsi(terminal).substring(0, gray.toAnsi(terminal).indexOf("末尾"))));
+            }
+            assertFalse(rendered.contains("\u001B[2m"), rendered);
+
+            screen.reset();
+            assertEquals(reasoning, display.collapse());
+            assertEquals(1, status.size());
+            String cleared = screen.toString(StandardCharsets.UTF_8);
+            assertTrue(cleared.contains(AnsiSeq.setScrollRegion(1, 6)), cleared);
+            assertTrue(cleared.contains(AnsiSeq.CLEAR_TO_EOL), cleared);
+            assertFalse(cleared.contains("末尾"), cleared);
+            assertEquals("", display.collapse());
         }
-
-        String output = terminalSink.toString(StandardCharsets.UTF_8);
-        assertFalse(output.contains("Sidekick"), "thinking panel should not duplicate status bar: " + output);
-        assertFalse(output.contains("glm-5.1"), "thinking panel should not duplicate model status: " + output);
-        assertFalse(output.contains("Auto Model"), "thinking panel should not duplicate footer cue: " + output);
-        assertTrue(output.contains("Thinking"), "thinking panel should keep the spinner label: " + output);
-        assertTrue(output.contains("Thinking... (Esc/Ctrl+C to cancel,"),
-                "thinking panel should keep a stable label and move the animation to the spinner: " + output);
-        assertTrue(output.contains("| trying to read file") || output.contains("│ trying to read file"),
-                "thinking panel should show quoted reasoning: " + output);
-        assertEquals(252, AnsiStyle.THINKING_CONTENT_GRAY_INDEX,
-                "thinking title and reasoning should use the light-gray terminal color");
-    }
-
-    @Test
-    void thinkingPanelOmitsStatusHeaderWhenStatusBarMissing() throws Exception {
-        ByteArrayOutputStream terminalSink = new ByteArrayOutputStream();
-        Terminal terminal = mockAnsiTerminal(terminalSink);
-
-        try (InlineActivityDisplay display = new InlineActivityDisplay(terminal,
-                new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8))) {
-            display.begin("Thinking");
-            terminal.writer().flush();
-        }
-
-        String output = terminalSink.toString(StandardCharsets.UTF_8);
-        assertFalse(output.contains("Sidekick"),
-                "without a status bar the activity panel should not invent a status row: " + output);
-        assertTrue(output.contains("Thinking"), output);
-    }
-
-    @Test
-    void refreshIfActiveIsNoOpWhenIdle() throws Exception {
-        ByteArrayOutputStream terminalSink = new ByteArrayOutputStream();
-        Terminal terminal = mockAnsiTerminal(terminalSink);
-        BottomStatusBar statusBar = new BottomStatusBar(terminal,
-                new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
-        statusBar.start();
-        statusBar.update(StatusInfo.idle("glm-5.1", 200_000L, false));
-
-        try (InlineActivityDisplay display = new InlineActivityDisplay(terminal,
-                new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8),
-                statusBar)) {
-            // no begin() called, panel is idle
-            display.refreshIfActive();
-            terminal.writer().flush();
-        }
-        String output = terminalSink.toString(StandardCharsets.UTF_8);
-        assertFalse(output.contains("Sidekick"),
-                "idle activity display must not paint when status updates: " + output);
-    }
-
-    private static Terminal mockAnsiTerminal(ByteArrayOutputStream sink) {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
-        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
-        Mockito.when(terminal.getWidth()).thenReturn(120);
-        Mockito.when(terminal.getHeight()).thenReturn(40);
-        PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8), true);
-        Mockito.when(terminal.writer()).thenReturn(writer);
-        Mockito.when(terminal.encoding()).thenReturn(StandardCharsets.UTF_8);
-        return terminal;
     }
 }

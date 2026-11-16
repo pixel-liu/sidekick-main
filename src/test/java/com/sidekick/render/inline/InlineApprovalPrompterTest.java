@@ -2,6 +2,7 @@ package com.sidekick.render.inline;
 
 import com.sidekick.hitl.ApprovalRequest;
 import com.sidekick.hitl.ApprovalResult;
+import com.sidekick.util.AnsiStyle;
 import org.jline.terminal.Terminal;
 import org.jline.utils.NonBlockingReader;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,8 @@ class InlineApprovalPrompterTest {
                 new BufferedReader(new StringReader("")));
         ApprovalResult result = p.prompt(ApprovalRequest.of("write_file", "{\"path\":\"a\"}", "test"));
         assertEquals(ApprovalResult.Decision.APPROVED, result.decision());
+        assertTrue(sink.toString(StandardCharsets.UTF_8).contains(
+                AnsiStyle.readableGray("[y] approve  [a] all  [n] reject  [s] skip  [m] modify")));
     }
 
     @Test

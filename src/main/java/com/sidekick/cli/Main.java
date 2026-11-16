@@ -1970,7 +1970,7 @@ public class Main {
             return;
         }
         lineReader.getWidgets().put("Sidekick-toggle-foldable", () -> {
-            inline.toggleLastBlock();
+            inline.openLastBlock();
             lineReader.callWidget(LineReader.REDISPLAY);
             return true;
         });

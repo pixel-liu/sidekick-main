@@ -5,13 +5,17 @@ import com.sidekick.hitl.ApprovalResult;
 import com.sidekick.llm.LlmClient;
 import com.sidekick.render.StatusInfo;
 import org.jline.reader.LineReader;
+import org.jline.reader.Reference;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
+import org.jline.terminal.impl.DumbTerminal;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.PrintStream;
 import java.io.PrintWriter;
@@ -159,99 +163,36 @@ class InlineRendererTest {
     }
 
     @Test
-    void thinkingPanelRendersJLineActivityReasoningAndClears() {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
-        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8), true);
-        Mockito.when(terminal.writer()).thenReturn(writer);
-        Mockito.doAnswer(invocation -> {
-            writer.flush();
-            return null;
-        }).when(terminal).flush();
-
-        InlineRenderer renderer = new InlineRenderer(terminal,
-                new PrintStream(sink, true, StandardCharsets.UTF_8));
-        try {
-            renderer.beginThinking("Thinking");
-            renderer.appendThinking("先分析用户输入\n再检查状态栏边界");
-
-            String rendered = sink.toString(StandardCharsets.UTF_8);
-            assertTrue(renderer.supportsThinkingPanel());
-            assertTrue(rendered.contains("Thinking"), rendered);
-            assertTrue(rendered.contains("先分析用户输入"), rendered);
-            assertTrue(rendered.contains("再检查状态栏边界"), rendered);
-            assertTrue(rendered.contains("|") || rendered.contains("│"),
-                    "activity display should show live reasoning quote content: " + rendered);
-
-            sink.reset();
-            renderer.endThinking();
-            String cleared = sink.toString(StandardCharsets.UTF_8);
-            assertFalse(cleared.contains(AnsiSeq.CLEAR_TO_EOS),
-                    "activity clearing must not clear to screen end and erase transcript scrollback: " + cleared);
-        } finally {
-            renderer.close();
-        }
-    }
-
-    @Test
-    void activityPanelOmitsCancelHintForNonCancelableWork() {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
-        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8), true);
-        Mockito.when(terminal.writer()).thenReturn(writer);
-        Mockito.doAnswer(invocation -> {
-            writer.flush();
-            return null;
-        }).when(terminal).flush();
-
-        InlineRenderer renderer = new InlineRenderer(terminal,
-                new PrintStream(sink, true, StandardCharsets.UTF_8));
-        try {
+    void activityPanelOmitsCancelHintForNonCancelableWork() throws Exception {
+        ByteArrayOutputStream screen = new ByteArrayOutputStream();
+        try (Terminal terminal = viewTerminal("", screen);
+             InlineRenderer renderer = new InlineRenderer(terminal, sink(screen))) {
+            renderer.start();
             renderer.beginActivity("Compacting conversation", "正在整理早期对话并生成摘要");
 
-            String rendered = sink.toString(StandardCharsets.UTF_8);
-            assertTrue(renderer.supportsActivityPanel());
+            String rendered = screen.toString(StandardCharsets.UTF_8);
             assertTrue(rendered.contains("Compacting conversation"), rendered);
-            assertTrue(rendered.contains("▰"), rendered);
-            assertTrue(rendered.contains("▱"), rendered);
             assertTrue(rendered.contains("%"), rendered);
-            assertFalse(rendered.contains("正在整理早期对话"), rendered);
             assertFalse(rendered.contains("Esc/Ctrl+C to cancel"), rendered);
-        } finally {
-            renderer.endActivity();
-            renderer.close();
         }
     }
 
     @Test
-    void toggleLastBlockRedrawsTranscriptAroundToolBlock() {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
-        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 4));
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        InlineRenderer renderer = new InlineRenderer(terminal,
-                new PrintStream(sink, true, StandardCharsets.UTF_8));
-        try {
+    void pagerShowsToolDetailsWithoutReplayingConversation() throws Exception {
+        ByteArrayOutputStream screen = new ByteArrayOutputStream();
+        ByteArrayOutputStream transcript = new ByteArrayOutputStream();
+        try (Terminal terminal = viewTerminal("q", screen);
+             InlineRenderer renderer = new InlineRenderer(terminal, sink(transcript))) {
             renderer.beginTurn();
             renderer.stream().println("before");
             renderer.appendToolCalls(List.of(tc("read_file", "{\"path\":\"README.md\"}")));
             renderer.stream().println("after");
+            String original = transcript.toString(StandardCharsets.UTF_8);
 
-            sink.reset();
-            assertTrue(renderer.toggleLastBlock());
+            assertTrue(renderer.openLastBlock());
 
-            String emitted = sink.toString(StandardCharsets.UTF_8);
-            assertTrue(emitted.contains("before"), emitted);
-            assertTrue(emitted.contains("README.md"), emitted);
-            assertTrue(emitted.contains("after"), emitted);
-            assertTrue(emitted.contains("collapse"), emitted);
-            assertTrue(emitted.contains(AnsiSeq.CLEAR_TO_EOS), emitted);
-        } finally {
-            renderer.close();
+            assertEquals(original, transcript.toString(StandardCharsets.UTF_8));
+            assertTrue(screen.toString(StandardCharsets.UTF_8).contains("README.md"));
         }
     }
 
@@ -337,70 +278,62 @@ class InlineRendererTest {
     }
 
     @Test
-    void streamedCodeBlockTogglesToExpandedOnRedraw() {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
-        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        InlineRenderer renderer = new InlineRenderer(terminal,
-                new PrintStream(sink, true, StandardCharsets.UTF_8));
-        try {
-            renderer.beginTurn();
+    void pagerShowsCodeBody() throws Exception {
+        ByteArrayOutputStream screen = new ByteArrayOutputStream();
+        try (Terminal terminal = viewTerminal("q", screen);
+             InlineRenderer renderer = new InlineRenderer(terminal, sink(new ByteArrayOutputStream()))) {
             renderer.stream().println("┌─ code: bash");
             renderer.stream().println("    echo hi");
             renderer.stream().println("└─ end");
 
-            sink.reset();
-            assertTrue(renderer.toggleLastBlock(), "代码块应可 toggle");
-
-            String emitted = sink.toString(StandardCharsets.UTF_8);
-            assertTrue(emitted.contains("echo hi"), "展开后应看到代码体: " + emitted);
-            assertTrue(emitted.contains("┌─ code: bash"), emitted);
-            assertTrue(emitted.contains("└─ end"), emitted);
-            assertTrue(emitted.contains("⏷"), "展开态应显示 collapse 提示: " + emitted);
-        } finally {
-            renderer.close();
+            assertTrue(renderer.openLastBlock());
+            assertTrue(screen.toString(StandardCharsets.UTF_8).contains("echo hi"));
         }
     }
 
     @Test
-    void completedThinkingCollapsesAndExpandsSeparatelyFromAnswer() {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
-        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8), true);
-        Mockito.when(terminal.writer()).thenReturn(writer);
-        Mockito.doAnswer(invocation -> {
-            writer.flush();
-            return null;
-        }).when(terminal).flush();
-
-        InlineRenderer renderer = new InlineRenderer(terminal,
-                new PrintStream(sink, true, StandardCharsets.UTF_8));
-        try {
-            renderer.beginTurn();
+    void openingThinkingTwiceKeepsLongAnswerAndDraftInPlace() throws Exception {
+        ByteArrayOutputStream screen = new ByteArrayOutputStream();
+        ByteArrayOutputStream transcript = new ByteArrayOutputStream();
+        try (Terminal terminal = viewTerminal("draft\u000Fq\u000Fq\n", screen);
+             InlineRenderer renderer = new InlineRenderer(terminal, sink(transcript))) {
+            ChatLineReader reader = renderer.createLineReader();
+            renderer.bindLineReader(reader);
+            reader.getWidgets().put("preview-block", renderer::openLastBlock);
+            reader.getKeyMaps().get(LineReader.MAIN).bind(new Reference("preview-block"), "\u000F");
+            renderer.start();
+            renderer.updateStatus(StatusInfo.idle("test-model", 10_000, false));
+            renderer.appendToolCalls(List.of(tc("read_file", "{\"path\":\"old-tool.txt\"}")));
             renderer.beginThinking("Thinking");
-            renderer.appendThinking("先检查输入。\n再组织答复。");
-
-            sink.reset();
+            renderer.appendThinking("思考细节");
             renderer.collapseThinking();
-            renderer.stream().println("最终答复");
+            renderer.stream().print("FINAL_ANSWER\n".repeat(80));
 
-            String collapsed = sink.toString(StandardCharsets.UTF_8);
-            assertTrue(collapsed.contains("Thinking . . . >"), collapsed);
-            assertFalse(collapsed.contains("先检查输入。"), collapsed);
-            assertTrue(collapsed.contains("最终答复"), collapsed);
+            String original = transcript.toString(StandardCharsets.UTF_8);
+            assertTrue(original.contains("Thinking . . . >"), original);
+            assertFalse(original.contains("思考细节"), original);
+            screen.reset();
+            assertEquals("draft", reader.readChatLine("❯ "));
 
-            sink.reset();
-            assertTrue(renderer.toggleLastBlock());
-            String expanded = sink.toString(StandardCharsets.UTF_8);
-            assertTrue(expanded.contains("先检查输入。"), expanded);
-            assertTrue(expanded.contains("再组织答复。"), expanded);
-            assertTrue(expanded.contains("最终答复"), expanded);
-        } finally {
-            renderer.close();
+            String frames = screen.toString(StandardCharsets.UTF_8);
+            assertEquals(2, frames.split("\\Q\u001B[?1049h\\E", -1).length - 1, frames);
+            assertEquals(2, frames.split("\\Q\u001B[?1049l\\E", -1).length - 1, frames);
+            assertTrue(frames.contains("思考细节"), frames);
+            assertFalse(frames.contains("FINAL_ANSWER"), frames);
+            assertFalse(frames.contains("old-tool.txt"), frames);
+            assertEquals(original, transcript.toString(StandardCharsets.UTF_8));
         }
+    }
+
+    private static Terminal viewTerminal(String keys, ByteArrayOutputStream screen) throws IOException {
+        Terminal terminal = new DumbTerminal("test", "xterm-256color",
+                new ByteArrayInputStream(keys.getBytes(StandardCharsets.UTF_8)), screen, StandardCharsets.UTF_8);
+        terminal.setSize(new Size(70, 18));
+        return terminal;
+    }
+
+    private static PrintStream sink(ByteArrayOutputStream output) {
+        return new PrintStream(output, true, StandardCharsets.UTF_8);
     }
 
     @Test

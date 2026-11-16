@@ -7,13 +7,21 @@ import com.sidekick.render.PlainRenderer;
 import com.sidekick.render.Renderer;
 import com.sidekick.render.StatusInfo;
 import com.sidekick.util.AnsiStyle;
+import org.jline.builtins.Less;
+import org.jline.builtins.Source;
 import org.jline.reader.LineReader;
 import org.jline.reader.Widget;
 import org.jline.terminal.Terminal;
+import org.jline.utils.InfoCmp.Capability;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class InlineRenderer implements Renderer {
 
+    private static final Logger log = LoggerFactory.getLogger(InlineRenderer.class);
     private final Terminal terminal;
     private final PlainRenderer fallback;
     private final BottomStatusBar statusBar;
@@ -36,11 +45,8 @@ public final class InlineRenderer implements Renderer {
     private final PrintStream out;
     private final Object transcriptLock = new Object();
     private final InlineActivityDisplay activityDisplay;
-    private final List<TranscriptEntry> transcript = new ArrayList<>();
     private final AtomicBoolean startupScreenPrinted = new AtomicBoolean(true);
     private volatile LineReader lineReader;
-    private int renderedRows;
-    private boolean redrawing;
     private volatile boolean started;
     private volatile boolean closed;
 
@@ -50,8 +56,6 @@ public final class InlineRenderer implements Renderer {
     private boolean inCodeBlock;
     private String codeLanguage = "";
     private String codeHeaderLine;
-    private int codeStartTranscriptIndex = -1;
-    private boolean codeHeaderEmitted;
 
     public InlineRenderer(Terminal terminal) {
         this(terminal, System.out);
@@ -67,7 +71,7 @@ public final class InlineRenderer implements Renderer {
                 : null;
         this.activityDisplay = statusBar == null
                 ? null
-                : new InlineActivityDisplay(terminal, out, statusBar);
+                : new InlineActivityDisplay(terminal, statusBar);
         this.blockRegistry = new BlockRegistry();
         this.stream = createTranscriptStream(out);
     }
@@ -75,17 +79,13 @@ public final class InlineRenderer implements Renderer {
     @Override
     public void beginTurn() {
         synchronized (transcriptLock) {
-            transcript.clear();
-            renderedRows = 0;
             lineBuffer.setLength(0);
             inCodeBlock = false;
             codeBodyLines.clear();
             codeLanguage = "";
             codeHeaderLine = null;
-            codeStartTranscriptIndex = -1;
-            codeHeaderEmitted = false;
+            blockRegistry.clear();
         }
-        blockRegistry.clear();
     }
 
     @Override
@@ -183,28 +183,25 @@ public final class InlineRenderer implements Renderer {
         if (activityDisplay == null || closed) {
             return;
         }
-        InlineActivityDisplay.CompletedThinking thinking = activityDisplay.collapse();
-        if (thinking.isEmpty()) {
+        appendCollapsedThinking(activityDisplay.collapse());
+    }
+
+    @Override
+    public void appendCollapsedThinking(String thinking) {
+        if (thinking == null || thinking.isBlank() || closed) {
             return;
         }
 
         List<String> expandedLines = new ArrayList<>();
         expandedLines.add(AnsiStyle.thinkingContentTitle("Thinking . . ."));
-        for (String line : thinking.lines()) {
-            expandedLines.add(AnsiStyle.thinkingContent("│ " + line));
+        for (String line : thinking.split("\\R", -1)) {
+            expandedLines.add(AnsiStyle.readableGray("│ " + cleanThinkingLine(line)));
         }
-        FoldableBlock block = new FoldableBlock(out,
-                AnsiStyle.thinkingContent("Thinking . . . >"),
-                expandedLines,
-                AnsiStyle.thinkingContent("< Thinking . . ."));
-        blockRegistry.register(block);
-        TranscriptEntry entry = new BlockEntry(block);
-        String rendered = entry.render();
-        synchronized (transcriptLock) {
-            transcript.add(entry);
-            renderedRows += estimateRows(rendered);
-            emit(rendered);
-        }
+        emitBlock(new FoldableBlock(out, AnsiStyle.readableGray("Thinking . . . >"), expandedLines));
+    }
+
+    static String cleanThinkingLine(String line) {
+        return line.replaceAll("[\\p{Cc}&&[^\\t]]", "");
     }
 
     @Override
@@ -215,7 +212,7 @@ public final class InlineRenderer implements Renderer {
     @Override
     public void beginActivity(String label, String detail) {
         if (activityDisplay != null && !closed) {
-            activityDisplay.beginActivity(label, detail);
+            activityDisplay.beginActivity(label);
         }
     }
 
@@ -277,17 +274,14 @@ public final class InlineRenderer implements Renderer {
             return;
         }
         Map<String, List<LlmClient.ToolCall>> grouped = ToolCallRenderer.group(toolCalls);
-        FoldableBlock block = new FoldableBlock(out,
+        emitBlock(new FoldableBlock(out,
                 ToolCallRenderer.collapsedHeader(grouped),
-                ToolCallRenderer.expandedLines(grouped));
+                ToolCallRenderer.expandedLines(grouped)));
+    }
+
+    private void emitBlock(FoldableBlock block) {
         blockRegistry.register(block);
-        TranscriptEntry entry = new BlockEntry(block);
-        String rendered = entry.render();
-        synchronized (transcriptLock) {
-            transcript.add(entry);
-            renderedRows += estimateRows(rendered);
-            emit(rendered);
-        }
+        emit(block.collapsedHeader() + System.lineSeparator());
     }
 
     @Override
@@ -331,18 +325,27 @@ public final class InlineRenderer implements Renderer {
         return terminal;
     }
 
-    /** Main.java 用：把 Ctrl+O 绑定到 toggleLast。 */
-    public BlockRegistry blockRegistry() {
-        return blockRegistry;
-    }
-
-    /** Main.java 用：Ctrl+O 触发内存态切换，然后重绘本轮 transcript。 */
-    public boolean toggleLastBlock() {
-        boolean changed = blockRegistry.toggleLastForRedraw();
-        if (changed) {
-            redrawTranscript();
+    /** Open only the most recent block in JLine's alternate-screen pager. */
+    public boolean openLastBlock() {
+        FoldableBlock block = blockRegistry.peekLast();
+        if (closed || block == null || terminal == null
+                || terminal.getStringCapability(Capability.enter_ca_mode) == null
+                || terminal.getStringCapability(Capability.exit_ca_mode) == null) {
+            return false;
         }
-        return changed;
+        String preview = "↑↓ 滚动 · q 返回对话\n\n" + String.join("\n", block.expandedLines()) + "\n";
+        Less pager = new Less(terminal, Path.of(""));
+        pager.noKeypad = true;
+        try {
+            pager.run(new Source.InputStreamSource(
+                    new ByteArrayInputStream(preview.getBytes(StandardCharsets.UTF_8)), true, "Sidekick"));
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (IOException e) {
+            log.warn("Unable to open inline block", e);
+        }
+        return false;
     }
 
     private PrintStream createTranscriptStream(PrintStream delegate) {
@@ -362,11 +365,6 @@ public final class InlineRenderer implements Renderer {
                     if (closed) {
                         return;
                     }
-                    if (redrawing) {
-                        // 重绘期间 BlockEntry.render() 已经决定折叠/展开形态，原样转发不再走折叠状态机
-                        delegate.write(b, off, len);
-                        return;
-                    }
                     feedWithCodeBlockDetection(text);
                 }
             }
@@ -381,11 +379,7 @@ public final class InlineRenderer implements Renderer {
     /**
      * 行级状态机：检测 {@code ┌─ code:} / {@code └─ end} 边界，把整段代码块换成
      * {@link FoldableBlock}。代码体在流式期间不写到终端（避免大段文本刷屏），
-     * 等 {@code └─ end} 到达后用 {@code [<n>A[J} 回退覆盖原 header 行 + 输出折叠头。
-     *
-     * <p>已知小瑕疵：代码块流式期间用户按 Ctrl+O 触发 {@link #redrawTranscript()} 会
-     * 看到 header 行被重新渲染但 body 行尚未在 transcript 里——属于罕见时序，
-     * 下一次 LLM 输出 / `/clear` / 退出可恢复。
+     * 等 {@code └─ end} 到达后输出折叠头。
      */
     private void feedWithCodeBlockDetection(String text) {
         for (int i = 0; i < text.length(); i++) {
@@ -403,19 +397,12 @@ public final class InlineRenderer implements Renderer {
         String stripped = stripAnsi(line).trim();
 
         if (!inCodeBlock && stripped.startsWith("┌─ code")) {
-            // 进入代码块：写出 header，记录 transcript 位置，body 之后会被吞掉
+            // Hold the whole block until the closing marker arrives.
             inCodeBlock = true;
             int colon = stripped.indexOf(':');
             codeLanguage = colon >= 0 ? stripped.substring(colon + 1).trim() : "";
             codeHeaderLine = stripTrailingNewline(line);
             codeBodyLines.clear();
-            codeStartTranscriptIndex = transcript.size();
-            codeHeaderEmitted = activePrintAboveReader() == null;
-            if (codeHeaderEmitted) {
-                emit(line);
-                transcript.add(new TextEntry(line));
-                renderedRows += estimateRows(line);
-            }
             return;
         }
 
@@ -423,14 +410,6 @@ public final class InlineRenderer implements Renderer {
             if (stripped.startsWith("└─ end")) {
                 int bodyLineCount = codeBodyLines.size();
                 inCodeBlock = false;
-
-                if (codeHeaderEmitted) {
-                    // 用 ANSI move-up + clear-to-eos 覆盖原 header 行。这里必须直写
-                    // 底层输出，因为 printAbove 是追加式输出，不适合承载光标回退。
-                    out.print(AnsiSeq.moveUp(1));
-                    out.print("\r");
-                    out.print(AnsiSeq.CLEAR_TO_EOS);
-                }
 
                 String label = codeLanguage.isEmpty() ? "code" : "code: " + codeLanguage;
                 String collapsedHeader = AnsiStyle.subtle(
@@ -443,31 +422,10 @@ public final class InlineRenderer implements Renderer {
                 }
                 expandedLines.add(stripTrailingNewline(line));
 
-                FoldableBlock block = new FoldableBlock(out, collapsedHeader, expandedLines, "⏷ collapse (ctrl+o)");
-                blockRegistry.register(block);
-
-                if (codeStartTranscriptIndex >= 0 && codeStartTranscriptIndex < transcript.size()) {
-                    transcript.set(codeStartTranscriptIndex, new BlockEntry(block));
-                } else {
-                    transcript.add(new BlockEntry(block));
-                }
-
-                if (codeHeaderEmitted) {
-                    out.print(collapsedHeader);
-                    out.print("\n");
-                    out.flush();
-                } else {
-                    emit(collapsedHeader + "\n");
-                }
-
-                // renderedRows 调整：移除原 header 占位（约 1 行），加入折叠头占位
-                renderedRows = Math.max(0, renderedRows - estimateRows(codeHeaderLine + "\n"));
-                renderedRows += estimateRows(collapsedHeader + "\n");
+                emitBlock(new FoldableBlock(out, collapsedHeader, expandedLines));
 
                 codeBodyLines.clear();
                 codeHeaderLine = null;
-                codeStartTranscriptIndex = -1;
-                codeHeaderEmitted = false;
                 return;
             }
             // body 行：缓冲，不写终端、不入 transcript
@@ -477,13 +435,11 @@ public final class InlineRenderer implements Renderer {
 
         // 非代码块：常规流式
         emit(line);
-        transcript.add(new TextEntry(line));
-        renderedRows += estimateRows(line);
     }
 
     private LineReader activePrintAboveReader() {
         LineReader reader = lineReader;
-        if (reader == null || redrawing || closed) {
+        if (reader == null || closed) {
             return null;
         }
         try {
@@ -552,135 +508,4 @@ public final class InlineRenderer implements Renderer {
         return s.substring(0, end);
     }
 
-    private void redrawTranscript() {
-        synchronized (transcriptLock) {
-            if (transcript.isEmpty()) {
-                return;
-            }
-            LineReader reader = activePrintAboveReader();
-            if (reader != null) {
-                StringBuilder snapshot = new StringBuilder();
-                int rowsAfter = 0;
-                for (TranscriptEntry entry : transcript) {
-                    String rendered = entry.render();
-                    snapshot.append(rendered);
-                    rowsAfter += estimateRows(rendered);
-                }
-                renderedRows = rowsAfter;
-                reader.printAbove(snapshot.toString());
-                return;
-            }
-            redrawing = true;
-            try {
-                int rows = TerminalCapabilities.safeSize(terminal).getRows();
-                int maxMove = Math.max(1, rows - (statusBar == null ? 1 : 2));
-                int move = Math.min(renderedRows, maxMove);
-                if (move > 0) {
-                    out.print(AnsiSeq.moveUp(move));
-                }
-                out.print("\r");
-                out.print(AnsiSeq.CLEAR_TO_EOS);
-                int rowsAfter = 0;
-                for (TranscriptEntry entry : transcript) {
-                    String rendered = entry.render();
-                    out.print(rendered);
-                    rowsAfter += estimateRows(rendered);
-                }
-                renderedRows = rowsAfter;
-                out.flush();
-            } finally {
-                redrawing = false;
-            }
-        }
-    }
-
-    private int estimateRows(String text) {
-        if (text == null || text.isEmpty()) {
-            return 0;
-        }
-        int cols = Math.max(20, TerminalCapabilities.safeSize(terminal).getColumns());
-        int rows = 0;
-        int col = 0;
-        boolean sawVisible = false;
-        for (int i = 0; i < text.length(); i++) {
-            char ch = text.charAt(i);
-            if (ch == '\u001B') {
-                i = skipAnsi(text, i);
-                continue;
-            }
-            if (ch == '\r') {
-                col = 0;
-                continue;
-            }
-            if (ch == '\n') {
-                rows++;
-                col = 0;
-                sawVisible = false;
-                continue;
-            }
-            int width = displayWidth(ch);
-            if (width <= 0) {
-                continue;
-            }
-            sawVisible = true;
-            col += width;
-            if (col >= cols) {
-                rows++;
-                col = 0;
-                sawVisible = false;
-            }
-        }
-        if (sawVisible) {
-            rows++;
-        }
-        return rows;
-    }
-
-    private int skipAnsi(String text, int escIndex) {
-        int i = escIndex + 1;
-        if (i < text.length() && text.charAt(i) == '[') {
-            i++;
-            while (i < text.length()) {
-                char c = text.charAt(i);
-                if (c >= '@' && c <= '~') {
-                    return i;
-                }
-                i++;
-            }
-        }
-        return escIndex;
-    }
-
-    private int displayWidth(char ch) {
-        if (Character.isISOControl(ch)) {
-            return 0;
-        }
-        Character.UnicodeBlock block = Character.UnicodeBlock.of(ch);
-        if (block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS
-                || block == Character.UnicodeBlock.CJK_SYMBOLS_AND_PUNCTUATION
-                || block == Character.UnicodeBlock.HALFWIDTH_AND_FULLWIDTH_FORMS
-                || block == Character.UnicodeBlock.HIRAGANA
-                || block == Character.UnicodeBlock.KATAKANA) {
-            return 2;
-        }
-        return 1;
-    }
-
-    private interface TranscriptEntry {
-        String render();
-    }
-
-    private record TextEntry(String text) implements TranscriptEntry {
-        @Override
-        public String render() {
-            return text;
-        }
-    }
-
-    private record BlockEntry(FoldableBlock block) implements TranscriptEntry {
-        @Override
-        public String render() {
-            return String.join(System.lineSeparator(), block.currentLines()) + System.lineSeparator();
-        }
-    }
 }

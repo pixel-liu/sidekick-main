@@ -67,6 +67,10 @@ public interface Renderer extends AutoCloseable {
         endThinking();
     }
 
+    /** Display reasoning received outside the live preview as a collapsed block. */
+    default void appendCollapsedThinking(String reasoning) {
+    }
+
     /** 追加 assistant 正文 delta。普通终端渲染器忽略；远程通道可用它做正文分片推送。 */
     default void appendAssistantContentDelta(String delta) {
     }

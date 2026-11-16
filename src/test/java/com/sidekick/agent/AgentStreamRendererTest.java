@@ -69,6 +69,7 @@ class AgentStreamRendererTest {
         invokeNoArg(renderer, "beginThinking");
         renderer.onReasoningDelta("我先判断用户意图。\n");
         renderer.onContentDelta("好的");
+        renderer.onReasoningDelta("这段思考在正文开始后才到达。");
         invokeNoArg(renderer, "finish");
 
         String transcript = thinkingRenderer.transcript();
@@ -78,6 +79,8 @@ class AgentStreamRendererTest {
         assertFalse(transcript.contains("思考过程"), transcript);
         assertTrue(transcript.contains("Thinking . . . >"), transcript);
         assertFalse(transcript.contains("我先判断用户意图。"), transcript);
+        assertFalse(transcript.contains("这段思考在正文开始后才到达。"), transcript);
+        assertTrue(thinkingRenderer.lateThinking.contains("这段思考在正文开始后才到达。"));
         assertFalse(transcript.contains("π 回复"), transcript);
         assertTrue(transcript.contains("好的"), transcript);
     }
@@ -119,6 +122,7 @@ class AgentStreamRendererTest {
         private boolean started;
         private boolean ended;
         private boolean collapsed;
+        private String lateThinking;
 
         @Override
         public void start() {
@@ -148,6 +152,11 @@ class AgentStreamRendererTest {
         public void collapseThinking() {
             collapsed = true;
             stream.println("Thinking . . . >");
+        }
+
+        @Override
+        public void appendCollapsedThinking(String reasoning) {
+            lateThinking = reasoning;
         }
 
         @Override

@@ -54,13 +54,13 @@ public final class AnsiStyle {
         return wrap(THINKING_GRAY, text);
     }
 
-    /** 低对比度但可读的模型思考内容；终端不支持 alpha，使用浅灰和弱化属性模拟。 */
-    public static String thinkingContent(String text) {
-        return wrap(DIM + THINKING_CONTENT_GRAY, text);
+    /** 思考区及审批按键使用的浅灰前景色。 */
+    public static String readableGray(String text) {
+        return wrap(THINKING_CONTENT_GRAY, text);
     }
 
     public static String thinkingContentTitle(String text) {
-        return wrap(DIM + ITALIC + THINKING_CONTENT_GRAY, text);
+        return wrap(ITALIC + THINKING_CONTENT_GRAY, text);
     }
 
     public static String userMessageBlock(String text, int columns) {

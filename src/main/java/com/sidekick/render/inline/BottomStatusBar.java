@@ -10,6 +10,7 @@ import org.jline.utils.AttributedStyle;
 import org.jline.utils.Status;
 
 import java.io.PrintStream;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -42,6 +43,7 @@ public final class BottomStatusBar implements AutoCloseable {
     private final PrintStream out;
     private volatile StatusInfo current;
     private Status status;
+    private List<AttributedString> activity = List.of();
     private boolean started;
     private boolean closed;
     private boolean inputPositioned;
@@ -91,6 +93,13 @@ public final class BottomStatusBar implements AutoCloseable {
         }
     }
 
+    void showActivity(List<AttributedString> lines) {
+        synchronized (out) {
+            activity = lines;
+            renderDock();
+        }
+    }
+
     /** 首次编辑从状态栏上方开始，后续编辑跟随对话输出的位置。 */
     public void prepareInputLine(int inputRows) {
         synchronized (out) {
@@ -113,15 +122,22 @@ public final class BottomStatusBar implements AutoCloseable {
 
     /** 调用方持有 out 锁，保证关闭后不会再画出状态栏。 */
     private void renderDock() {
-        if (current == null || status == null || closed) {
+        if (status == null || closed) {
             return;
         }
-        int cols = TerminalCapabilities.safeSize(terminal).getColumns();
+        var size = TerminalCapabilities.safeSize(terminal);
+        int cols = size.getColumns();
         // JLine fills the last cell and emits a space to force wrap on terminals without
         // delayed-wrap support. At the bottom of the screen this can overwrite column one.
         boolean protectFirstColumn = terminal.getBooleanCapability(InfoCmp.Capability.auto_right_margin)
                 && !terminal.getBooleanCapability(InfoCmp.Capability.eat_newline_glitch);
-        status.update(formatStatusLines(current, cols, protectFirstColumn));
+        List<AttributedString> statusLines = current == null ? List.of()
+                : formatStatusLines(current, cols, protectFirstColumn);
+        // Always leave at least two rows available for normal scrolling.
+        int previewRows = Math.min(activity.size(), Math.max(0, size.getRows() - statusLines.size() - 2));
+        List<AttributedString> dock = new ArrayList<>(activity.subList(0, previewRows));
+        dock.addAll(statusLines);
+        status.update(dock);
     }
 
     @Override
