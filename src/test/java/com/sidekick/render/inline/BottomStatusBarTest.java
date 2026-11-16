@@ -69,23 +69,24 @@ class BottomStatusBarTest {
     }
 
     @Test
-    void statusLinesUseTheSameGrayForAllUsageAndWarningText() {
+    void statusLinesKeepTheirOriginalSemanticColors() {
         StatusInfo info = StatusInfo.tokens("deepseek-v4-pro", 1_000_000L, 950_000L, 16_100L,
                         437L, 14_300L, null, false, 0L, "idle")
                 .withEnvironment("MCP 5/5", "Skill 3/5");
         AttributedString line = BottomStatusBar.formatStatusLines(info, 140, false).get(0);
-        AttributedStyle gray = InlineTheme.TEXT;
-        assertSegmentStyle(line, "deepseek-v4-pro", gray.bold());
-        assertSegmentStyle(line, "ctx 95%", gray.bold());
-        assertSegmentStyle(line, "███████▋", gray.bold());
-        assertSegmentStyle(line, "in 16.1k", gray);
-        assertSegmentStyle(line, "out 437", gray);
-        assertSegmentStyle(line, "cache 14.3k", gray);
+        AttributedStyle red = AttributedStyle.DEFAULT.foreground(AttributedStyle.BRIGHT | AttributedStyle.RED);
+        assertSegmentStyle(line, "deepseek-v4-pro", AttributedStyle.DEFAULT.foreground(147).bold());
+        assertSegmentStyle(line, "ctx 95%", red.bold());
+        assertSegmentStyle(line, "███████▋", red.bold());
+        assertSegmentStyle(line, "in 16.1k", AttributedStyle.DEFAULT.foreground(153));
+        assertSegmentStyle(line, "out 437", AttributedStyle.DEFAULT.foreground(156));
+        assertSegmentStyle(line, "cache 14.3k", AttributedStyle.DEFAULT.foreground(213));
 
         AttributedString warning = BottomStatusBar.formatStatusLines(
                 StatusInfo.idle("model", 100, 70, true), 120, false).get(0);
-        assertSegmentStyle(warning, "ctx 70%", gray.bold());
-        assertSegmentStyle(warning, "█████▋", gray.bold());
+        AttributedStyle yellow = AttributedStyle.DEFAULT.foreground(AttributedStyle.BRIGHT | AttributedStyle.YELLOW);
+        assertSegmentStyle(warning, "ctx 70%", yellow.bold());
+        assertSegmentStyle(warning, "█████▋", yellow.bold());
     }
 
     @Test

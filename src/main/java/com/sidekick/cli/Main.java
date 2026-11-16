@@ -1109,7 +1109,7 @@ public class Main {
                 }
                 if (renderer instanceof InlineRenderer && !ctrlC.taskCanceled && response != null
                         && !response.startsWith("❌") && !response.startsWith("⏹")) {
-                    ui.println(turnTimingLine(taskElapsedMillis, taskCompletedAt));
+                    renderer.assistantStream().println(turnTimingLine(taskElapsedMillis, taskCompletedAt));
                     ui.println();
                 }
             }

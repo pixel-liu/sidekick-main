@@ -324,6 +324,7 @@ class InlineRendererTest {
 
             String frames = screen.toString(StandardCharsets.UTF_8);
             assertFalse(frames.contains("\u001B[?1049h"), frames);
+            assertTrue(frames.lastIndexOf("思考正文") < frames.lastIndexOf("❯ draft"), frames);
             assertTrue(frames.contains("第一次思考"), frames);
             assertTrue(frames.contains("第二次思考"), frames);
             assertTrue(frames.contains("补充思考"), frames);

@@ -144,7 +144,7 @@ public final class ChatLineReader extends LineReaderImpl {
     @Override
     public AttributedString getDisplayedBufferWithPrompts(List<AttributedString> secondaryPrompts) {
         if (!showFrame()) {
-            return InlineTheme.foreground(super.getDisplayedBufferWithPrompts(secondaryPrompts));
+            return super.getDisplayedBufferWithPrompts(secondaryPrompts);
         }
         AttributedStringBuilder frame = new AttributedStringBuilder();
         if (getBuffer().length() == 0 && post == null && searchTerm == null) {
@@ -158,23 +158,26 @@ public final class ChatLineReader extends LineReaderImpl {
             frame.append(super.getDisplayedBufferWithPrompts(secondaryPrompts));
         }
         frame.append('\n').append(rule());
-        AttributedStringBuilder themed = new AttributedStringBuilder()
-                .append(InlineTheme.foreground(frame.toAttributedString()));
-        appendPreview(themed);
-        return themed.toAttributedString();
+        AttributedString inputFrame = frame.toAttributedString();
+        AttributedString previewFrame = previewBeforeInput(inputFrame);
+        if (previewFrame.length() == 0) {
+            return inputFrame;
+        }
+        return new AttributedStringBuilder().append(previewFrame).append('\n').append(inputFrame).toAttributedString();
     }
 
-    private void appendPreview(AttributedStringBuilder frame) {
+    /** Keep an expanded block immediately before the chat input, above the next prompt. */
+    private AttributedString previewBeforeInput(AttributedString inputFrame) {
         previewPageRows = 0;
         if (preview.isEmpty()) {
-            return;
+            return AttributedString.EMPTY;
         }
         int cols = size.getColumns();
         int dock = Status.getExistingStatus(terminal).map(Status::size).orElse(0);
-        int inputRows = frame.toAttributedString().columnSplitLength(cols, false, true, terminal).size();
+        int inputRows = inputFrame.columnSplitLength(cols, false, true, terminal).size();
         int room = size.getRows() - dock - inputRows - 1;
         if (room <= 0) {
-            return;
+            return AttributedString.EMPTY;
         }
         int width = cols - 1;
         if (previewWidth != width) {
@@ -190,10 +193,12 @@ public final class ChatLineReader extends LineReaderImpl {
             heading += " · PgUp/PgDn";
         }
         AttributedString title = new AttributedString(heading, InlineTheme.TEXT);
-        frame.append('\n').append(title.columnSubSequence(0, width, terminal));
+        AttributedStringBuilder previewFrame = new AttributedStringBuilder();
+        previewFrame.append(title.columnSubSequence(0, width, terminal));
         for (int i = previewStart; i < previewStart + previewPageRows; i++) {
-            frame.append('\n').append(wrappedPreview.get(i));
+            previewFrame.append('\n').append(wrappedPreview.get(i));
         }
+        return previewFrame.toAttributedString();
     }
 
     @Override
