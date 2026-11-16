@@ -59,6 +59,14 @@ public interface Renderer extends AutoCloseable {
     default void endThinking() {
     }
 
+    /**
+     * 结束模型思考面板，并在支持行内 transcript 的渲染器中保留一条可展开入口。
+     * 其他渲染器维持原有的清理行为。
+     */
+    default void collapseThinking() {
+        endThinking();
+    }
+
     /** 追加 assistant 正文 delta。普通终端渲染器忽略；远程通道可用它做正文分片推送。 */
     default void appendAssistantContentDelta(String delta) {
     }

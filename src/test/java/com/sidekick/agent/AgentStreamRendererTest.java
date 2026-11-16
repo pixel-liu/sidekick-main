@@ -73,11 +73,11 @@ class AgentStreamRendererTest {
 
         String transcript = thinkingRenderer.transcript();
         assertTrue(thinkingRenderer.started);
-        assertTrue(thinkingRenderer.ended);
+        assertTrue(thinkingRenderer.collapsed);
         assertTrue(thinkingRenderer.thinking().contains("我先判断用户意图。"));
         assertFalse(transcript.contains("思考过程"), transcript);
-        assertTrue(transcript.contains("Thinking..."), transcript);
-        assertTrue(transcript.contains("│ 我先判断用户意图。"), transcript);
+        assertTrue(transcript.contains("Thinking . . . >"), transcript);
+        assertFalse(transcript.contains("我先判断用户意图。"), transcript);
         assertFalse(transcript.contains("π 回复"), transcript);
         assertTrue(transcript.contains("好的"), transcript);
     }
@@ -118,6 +118,7 @@ class AgentStreamRendererTest {
         private final PrintStream stream = new PrintStream(output, true, StandardCharsets.UTF_8);
         private boolean started;
         private boolean ended;
+        private boolean collapsed;
 
         @Override
         public void start() {
@@ -141,6 +142,12 @@ class AgentStreamRendererTest {
         @Override
         public void endThinking() {
             ended = true;
+        }
+
+        @Override
+        public void collapseThinking() {
+            collapsed = true;
+            stream.println("Thinking . . . >");
         }
 
         @Override

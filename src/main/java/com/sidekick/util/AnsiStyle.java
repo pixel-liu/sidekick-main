@@ -5,6 +5,7 @@ package com.sidekick.util;
  */
 public final class AnsiStyle {
     public static final int THINKING_GRAY_INDEX = 250;
+    public static final int THINKING_CONTENT_GRAY_INDEX = 252;
 
     private static final String RESET = "\u001B[0m";
     private static final String BOLD = "\u001B[1m";
@@ -16,6 +17,7 @@ public final class AnsiStyle {
     private static final String RED = "\u001B[31m";
     private static final String GRAY = "\u001B[90m";
     private static final String THINKING_GRAY = "\u001B[38;5;" + THINKING_GRAY_INDEX + "m";
+    private static final String THINKING_CONTENT_GRAY = "\u001B[38;5;" + THINKING_CONTENT_GRAY_INDEX + "m";
     private static final String BRIGHT_WHITE = "\u001B[97m";
     private static final String PURPLE = "\u001B[38;5;141m";
     private static final String BG_PANEL = "\u001B[48;5;236m";
@@ -50,6 +52,15 @@ public final class AnsiStyle {
 
     public static String thinkingQuote(String text) {
         return wrap(THINKING_GRAY, text);
+    }
+
+    /** 低对比度但可读的模型思考内容；终端不支持 alpha，使用浅灰和弱化属性模拟。 */
+    public static String thinkingContent(String text) {
+        return wrap(DIM + THINKING_CONTENT_GRAY, text);
+    }
+
+    public static String thinkingContentTitle(String text) {
+        return wrap(DIM + ITALIC + THINKING_CONTENT_GRAY, text);
     }
 
     public static String userMessageBlock(String text, int columns) {

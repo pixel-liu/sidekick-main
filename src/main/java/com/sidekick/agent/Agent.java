@@ -849,10 +849,9 @@ public class Agent {
      * 服务器可能把 reasoning_content 切成多段下发，甚至在 content 开始之后追加 reasoning；
      * 终端是线性的，无法回头修改已写出的文字。渲染策略：
      *
-     * 1. 在 content 出现之前，只要 reasoning 有实质内容（非空白），就立刻流式打印在"🧠 思考过程"下
-     *    同一次用户输入只打印一次"🧠 思考过程"标题；工具调用后的后续推理继续归在同一块下
-     * 2. 仅空白的 reasoning delta 会先暂存，不触发标题——避免出现"空的思考过程"
-     * 3. content 一出现就收尾 reasoning 区，用低调标记进入正文并流式输出 content
+     * 1. inline 渲染器会在 content 出现前实时显示 reasoning，并在 content 到达时折叠为可展开入口。
+     * 2. 仅空白的 reasoning delta 不触发思考区。
+     * 3. content 一出现就收尾 reasoning 区，用低调标记进入正文并流式输出 content。
      * 4. 如果 content 启动之后又收到 reasoning（服务器把思考内容追加在答案之后），
      *    缓冲到 lateReasoning，最终在 finish() 用"🧠 补充思考"标题独立展示，不会污染回复区
      */
@@ -867,7 +866,6 @@ public class Agent {
         private boolean reasoningHeadingPrinted;
         private boolean reasoningStarted;
         private boolean contentStarted;
-        private boolean thinkingQuotePrinted;
         private boolean streamedOutput;
         private long requestStartNanos;
         private long firstReasoningMs = -1;
@@ -990,7 +988,7 @@ public class Agent {
             }
             if (!contentStarted) {
                 if (hasThinkingPanel()) {
-                    finishThinkingPanelAndPrintQuote();
+                    collapseThinkingPanel();
                 } else if (reasoningStarted && reasoningRenderer != null) {
                     reasoningRenderer.finish();
                     out().println();
@@ -1021,7 +1019,7 @@ public class Agent {
 
         private void resetBetweenIterations() {
             if (hasThinkingPanel()) {
-                finishThinkingPanelAndPrintQuote();
+                collapseThinkingPanel();
             }
             if (reasoningRenderer != null) {
                 reasoningRenderer.finish();
@@ -1050,7 +1048,6 @@ public class Agent {
             visibleReasoning.setLength(0);
             reasoningStarted = false;
             contentStarted = false;
-            thinkingQuotePrinted = false;
             if (streamedOutput) {
                 out().println();
             }
@@ -1058,7 +1055,7 @@ public class Agent {
 
         private void finish() {
             if (hasThinkingPanel()) {
-                finishThinkingPanelAndPrintQuote();
+                collapseThinkingPanel();
             }
             if (reasoningRenderer != null) {
                 reasoningRenderer.finish();
@@ -1117,42 +1114,18 @@ public class Agent {
             return new TerminalMarkdownRenderer(out());
         }
 
-        private void finishThinkingPanelAndPrintQuote() {
+        private void collapseThinkingPanel() {
             if (!hasThinkingPanel()) {
                 return;
             }
             if (pendingReasoning.length() > 0 && !pendingReasoning.toString().isBlank()) {
                 renderer.appendThinking(pendingReasoning.toString());
             }
-            renderer.endThinking();
+            renderer.collapseThinking();
             pendingReasoning.setLength(0);
-            printThinkingQuoteIfNeeded();
-        }
-
-        private void printThinkingQuoteIfNeeded() {
-            if (thinkingQuotePrinted) {
-                return;
+            if (!visibleReasoning.isEmpty()) {
+                streamedOutput = true;
             }
-            if (!rendersReasoning()) {
-                return;
-            }
-            String reasoning = visibleReasoning.toString()
-                    .replace("\r\n", "\n")
-                    .replace('\r', '\n')
-                    .trim();
-            if (reasoning.isEmpty()) {
-                return;
-            }
-            out().println(AnsiStyle.thinking("Thinking..."));
-            for (String line : reasoning.split("\\R+")) {
-                String normalized = line.replaceAll("\\s+", " ").trim();
-                if (!normalized.isEmpty()) {
-                    out().println(AnsiStyle.thinkingQuote("│ " + normalized));
-                }
-            }
-            out().println();
-            thinkingQuotePrinted = true;
-            streamedOutput = true;
         }
 
         private void printReasoningHeadingIfNeeded() {

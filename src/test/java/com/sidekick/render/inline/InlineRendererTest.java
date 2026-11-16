@@ -364,6 +364,46 @@ class InlineRendererTest {
     }
 
     @Test
+    void completedThinkingCollapsesAndExpandsSeparatelyFromAnswer() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8), true);
+        Mockito.when(terminal.writer()).thenReturn(writer);
+        Mockito.doAnswer(invocation -> {
+            writer.flush();
+            return null;
+        }).when(terminal).flush();
+
+        InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8));
+        try {
+            renderer.beginTurn();
+            renderer.beginThinking("Thinking");
+            renderer.appendThinking("先检查输入。\n再组织答复。");
+
+            sink.reset();
+            renderer.collapseThinking();
+            renderer.stream().println("最终答复");
+
+            String collapsed = sink.toString(StandardCharsets.UTF_8);
+            assertTrue(collapsed.contains("Thinking . . . >"), collapsed);
+            assertFalse(collapsed.contains("先检查输入。"), collapsed);
+            assertTrue(collapsed.contains("最终答复"), collapsed);
+
+            sink.reset();
+            assertTrue(renderer.toggleLastBlock());
+            String expanded = sink.toString(StandardCharsets.UTF_8);
+            assertTrue(expanded.contains("先检查输入。"), expanded);
+            assertTrue(expanded.contains("再组织答复。"), expanded);
+            assertTrue(expanded.contains("最终答复"), expanded);
+        } finally {
+            renderer.close();
+        }
+    }
+
+    @Test
     void nonCodeStreamingTextStillFlowsThrough() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getType()).thenReturn("xterm-256color");

@@ -128,6 +128,10 @@ Agent 可使用 `read_file`、`write_file`、`list_dir`、`glob_files`、`grep_c
 
 ReAct 日志中的 `ReAct LLM timing` 按请求记录准备时间、收到首段思考和首段正文的时间、模型调用总时长（毫秒）。`-1` 表示没有收到该类内容。
 
+## 终端交互
+
+在默认 inline renderer 中，模型思考会以低对比度浅灰区域实时显示，与最终答复分开。最终答复开始时，思考内容会自动全部收起为 `Thinking . . . >`；按 Ctrl+O 可展开或再次收起本轮最近的思考块，完整思考内容仅在展开后显示。
+
 MCP 配置文件不存在时会创建默认 Chrome DevTools 配置。自定义 MCP server 可使用 stdio `command` 或 Streamable HTTP `url`；配置中的 `${PROJECT_DIR}`、`${HOME}` 和环境变量会在启动时展开。
 
 ## 上下文压缩与紧急降级

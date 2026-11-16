@@ -1,6 +1,7 @@
 package com.sidekick.render.inline;
 
 import com.sidekick.render.StatusInfo;
+import com.sidekick.util.AnsiStyle;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
 import org.junit.jupiter.api.Test;
@@ -45,7 +46,7 @@ class InlineActivityDisplayTest {
                 "thinking panel should keep a stable label and move the animation to the spinner: " + output);
         assertTrue(output.contains("| trying to read file") || output.contains("│ trying to read file"),
                 "thinking panel should show quoted reasoning: " + output);
-        assertEquals(252, InlineActivityDisplay.THINKING_CONTENT_GRAY_INDEX,
+        assertEquals(252, AnsiStyle.THINKING_CONTENT_GRAY_INDEX,
                 "thinking title and reasoning should use the light-gray terminal color");
     }
 

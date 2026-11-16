@@ -27,11 +27,10 @@ final class InlineActivityDisplay implements AutoCloseable {
 
     private static final int MAX_REASONING_CHARS = 4096;
     private static final int MAX_REASONING_ROWS = 4;
-    static final int THINKING_CONTENT_GRAY_INDEX = 252;
     private static final String[] SPINNER_FRAMES = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
     private static final AttributedStyle STATUS_STYLE = AttributedStyle.DEFAULT.italic();
     private static final AttributedStyle QUOTE_STYLE = AnsiStyle.isEnabled()
-            ? AttributedStyle.DEFAULT.foreground(THINKING_CONTENT_GRAY_INDEX)
+            ? AttributedStyle.DEFAULT.foreground(AnsiStyle.THINKING_CONTENT_GRAY_INDEX).faint()
             : AttributedStyle.DEFAULT;
     private static final AttributedStyle THINKING_TITLE_STYLE = QUOTE_STYLE.italic();
 
@@ -133,6 +132,19 @@ final class InlineActivityDisplay implements AutoCloseable {
         cancelTickLocked();
         reasoning.setLength(0);
         clearLocked();
+    }
+
+    /** 清除活动区域并返回完整思考内容，供 transcript 收起为可展开入口。 */
+    synchronized CompletedThinking collapse() {
+        if (closed || !active) {
+            return CompletedThinking.empty();
+        }
+        CompletedThinking completed = new CompletedThinking(reasoningLines());
+        active = false;
+        cancelTickLocked();
+        reasoning.setLength(0);
+        clearLocked();
+        return completed;
     }
 
     @Override
@@ -314,5 +326,21 @@ final class InlineActivityDisplay implements AutoCloseable {
             return;
         }
         reasoning.delete(0, reasoning.length() - MAX_REASONING_CHARS);
+    }
+
+    record CompletedThinking(List<String> lines) {
+        private static final CompletedThinking EMPTY = new CompletedThinking(List.of());
+
+        CompletedThinking {
+            lines = List.copyOf(lines);
+        }
+
+        static CompletedThinking empty() {
+            return EMPTY;
+        }
+
+        boolean isEmpty() {
+            return lines.isEmpty();
+        }
     }
 }

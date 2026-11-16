@@ -179,6 +179,35 @@ public final class InlineRenderer implements Renderer {
     }
 
     @Override
+    public void collapseThinking() {
+        if (activityDisplay == null || closed) {
+            return;
+        }
+        InlineActivityDisplay.CompletedThinking thinking = activityDisplay.collapse();
+        if (thinking.isEmpty()) {
+            return;
+        }
+
+        List<String> expandedLines = new ArrayList<>();
+        expandedLines.add(AnsiStyle.thinkingContentTitle("Thinking . . ."));
+        for (String line : thinking.lines()) {
+            expandedLines.add(AnsiStyle.thinkingContent("│ " + line));
+        }
+        FoldableBlock block = new FoldableBlock(out,
+                AnsiStyle.thinkingContent("Thinking . . . >"),
+                expandedLines,
+                AnsiStyle.thinkingContent("< Thinking . . ."));
+        blockRegistry.register(block);
+        TranscriptEntry entry = new BlockEntry(block);
+        String rendered = entry.render();
+        synchronized (transcriptLock) {
+            transcript.add(entry);
+            renderedRows += estimateRows(rendered);
+            emit(rendered);
+        }
+    }
+
+    @Override
     public boolean supportsActivityPanel() {
         return activityDisplay != null;
     }
