@@ -4,6 +4,7 @@ package com.sidekick.util;
  * 终端 ANSI 样式辅助。
  */
 public final class AnsiStyle {
+    public static final int INTERFACE_RGB = 0x666666;
     public static final int THINKING_GRAY_INDEX = 250;
     public static final int THINKING_CONTENT_GRAY_INDEX = 252;
 
@@ -35,7 +36,7 @@ public final class AnsiStyle {
     }
 
     public static String answerMarker() {
-        return wrap(BOLD + GREEN, "▪");
+        return wrap("\u001B[38;2;102;102;102m", "▪");
     }
 
     public static String subtle(String text) {

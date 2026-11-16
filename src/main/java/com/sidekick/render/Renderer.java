@@ -121,6 +121,11 @@ public interface Renderer extends AutoCloseable {
      */
     PrintStream stream();
 
+    /** Model reply body, using its own formatting in renderers with a conversation theme. */
+    default PrintStream assistantStream() {
+        return stream();
+    }
+
     /** 当前输出区域可用列数。Markdown 表格等宽布局按这个值做收缩和换行。 */
     default int terminalColumns() {
         return 120;

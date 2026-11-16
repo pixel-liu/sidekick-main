@@ -2,6 +2,7 @@ package com.sidekick.render.inline;
 
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
+import org.jline.utils.InfoCmp;
 
 /**
  * 终端能力探测：决定 inline 渲染器的各项特性是否可启用。
@@ -11,6 +12,14 @@ import org.jline.terminal.Terminal;
 public final class TerminalCapabilities {
 
     private TerminalCapabilities() {
+    }
+
+    /** Windows VT output supports RGB even though JLine's bundled profile lists 256 colors. */
+    public static void configureWindowsVtTrueColor() {
+        String profile = InfoCmp.getDefaultInfoCmp("windows-vtp");
+        if (profile != null) {
+            InfoCmp.setLoadedInfoCmp("windows-vtp", profile.replace("colors#256", "colors#16777216"));
+        }
     }
 
     /** 终端是否能渲染 ANSI 转义序列（颜色、光标控制、inline status 等）。 */

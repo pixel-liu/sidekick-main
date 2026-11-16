@@ -1000,8 +1000,10 @@ public class Agent {
                     pendingReasoning.setLength(0);
                     reasoningStarted = true;
                 }
-                out().print(AnsiStyle.answerMarker() + " ");
-                contentRenderer = newMarkdownRenderer();
+                PrintStream answer = renderer == null ? out() : renderer.assistantStream();
+                answer.print(AnsiStyle.answerMarker() + " ");
+                contentRenderer = renderer == null ? new TerminalMarkdownRenderer(answer)
+                        : new TerminalMarkdownRenderer(answer, renderer::terminalColumns);
                 contentStarted = true;
                 streamedOutput = true;
             }

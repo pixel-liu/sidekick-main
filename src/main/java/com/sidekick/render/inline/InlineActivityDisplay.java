@@ -1,6 +1,5 @@
 package com.sidekick.render.inline;
 
-import com.sidekick.util.AnsiStyle;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStyle;
@@ -24,11 +23,7 @@ final class InlineActivityDisplay implements AutoCloseable {
     private static final int MAX_PREVIEW_CHARS = 4096;
     private static final int MAX_REASONING_ROWS = 4;
     private static final String[] SPINNER_FRAMES = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
-    private static final AttributedStyle STATUS_STYLE = AttributedStyle.DEFAULT.italic();
-    static final AttributedStyle THINKING_STYLE = AnsiStyle.isEnabled()
-            ? AttributedStyle.DEFAULT.foreground(AnsiStyle.THINKING_CONTENT_GRAY_INDEX)
-            : AttributedStyle.DEFAULT;
-    private static final AttributedStyle THINKING_TITLE_STYLE = THINKING_STYLE.italic();
+    private static final AttributedStyle STATUS_STYLE = InlineTheme.TEXT.italic();
 
     private final Terminal terminal;
     private final BottomStatusBar statusBar;
@@ -175,7 +170,7 @@ final class InlineActivityDisplay implements AutoCloseable {
             return lines;
         }
         String suffix = " (Esc/Ctrl+C to cancel, " + elapsedSeconds() + "s)";
-        lines.add(fit("  " + spinner() + " " + label + "..." + suffix, cols, THINKING_TITLE_STYLE));
+        lines.add(fit("  " + spinner() + " " + label + "..." + suffix, cols, STATUS_STYLE));
 
         List<String> quoteLines = reasoningLines();
         int quoteWidth = Math.max(1, cols - 4);
@@ -185,7 +180,7 @@ final class InlineActivityDisplay implements AutoCloseable {
             var wrapped = new AttributedString(quoteLines.get(i))
                     .columnSplitLength(quoteWidth, false, true, terminal);
             for (int j = wrapped.size() - 1; j >= 0 && preview.size() < maxRows; j--) {
-                preview.addFirst(fit("  │ " + wrapped.get(j), cols, THINKING_STYLE));
+                preview.addFirst(fit("  │ " + wrapped.get(j), cols, InlineTheme.TEXT));
             }
         }
         lines.addAll(preview);

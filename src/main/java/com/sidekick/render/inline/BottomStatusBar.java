@@ -184,7 +184,7 @@ public final class BottomStatusBar implements AutoCloseable {
         int contentWidth = Math.max(0, cols - leftInset - 1);
         AttributedStringBuilder line = new AttributedStringBuilder();
         line.append(" ".repeat(leftInset)).append(formatSessionLine(info, contentWidth));
-        return List.of(fitToColumns(line.toAttributedString(), cols));
+        return List.of(InlineTheme.foreground(fitToColumns(line.toAttributedString(), cols)));
     }
 
     private static AttributedString formatSessionLine(StatusInfo info, int cols) {

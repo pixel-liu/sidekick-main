@@ -34,6 +34,8 @@ public final class InlineRenderer implements Renderer {
     private final BottomStatusBar statusBar;
     private final BlockRegistry blockRegistry;
     private final PrintStream stream;
+    private final PrintStream assistantStream;
+    private final PrintStream uiOutput;
     private final PrintStream out;
     private final Object transcriptLock = new Object();
     private final StringBuilder turnThinking = new StringBuilder();
@@ -45,8 +47,11 @@ public final class InlineRenderer implements Renderer {
 
     // —— 代码块折叠状态机字段（仅供 createTranscriptStream 内部使用）——
     private final StringBuilder lineBuffer = new StringBuilder();
+    private final StringBuilder assistantLineBuffer = new StringBuilder();
     private final List<String> codeBodyLines = new ArrayList<>();
     private boolean inCodeBlock;
+    private boolean codeIsAssistant;
+    private volatile FoldableBlock assistantCodeBlock;
     private String codeLanguage = "";
     private String codeHeaderLine;
 
@@ -66,14 +71,18 @@ public final class InlineRenderer implements Renderer {
                 ? null
                 : new InlineActivityDisplay(terminal, statusBar);
         this.blockRegistry = new BlockRegistry();
-        this.stream = createTranscriptStream(out);
+        this.stream = createTranscriptStream(lineBuffer, false);
+        this.assistantStream = createTranscriptStream(assistantLineBuffer, true);
+        this.uiOutput = InlineTheme.stream(out);
     }
 
     @Override
     public void beginTurn() {
         synchronized (transcriptLock) {
             lineBuffer.setLength(0);
+            assistantLineBuffer.setLength(0);
             inCodeBlock = false;
+            assistantCodeBlock = null;
             codeBodyLines.clear();
             codeLanguage = "";
             codeHeaderLine = null;
@@ -144,6 +153,11 @@ public final class InlineRenderer implements Renderer {
     }
 
     @Override
+    public PrintStream assistantStream() {
+        return assistantStream;
+    }
+
+    @Override
     public int terminalColumns() {
         return Math.max(40, TerminalCapabilities.safeSize(terminal).getColumns());
     }
@@ -197,7 +211,7 @@ public final class InlineRenderer implements Renderer {
             turnThinking.append(thinking.strip());
         }
         if (first) {
-            emit(AnsiStyle.readableGray("Thinking . . . >") + System.lineSeparator());
+            emitUi("Thinking . . . >" + System.lineSeparator());
         }
     }
 
@@ -266,7 +280,7 @@ public final class InlineRenderer implements Renderer {
             return;
         }
         int cols = Math.max(20, TerminalCapabilities.safeSize(terminal).getColumns() - 1);
-        emit(AnsiStyle.userMessageBlock(visible, cols) + "\n");
+        emitUi(AnsiStyle.userMessageBlock(visible, cols) + "\n");
     }
 
     @Override
@@ -282,12 +296,12 @@ public final class InlineRenderer implements Renderer {
 
     private void emitBlock(FoldableBlock block) {
         blockRegistry.register(block);
-        emit(block.collapsedHeader() + System.lineSeparator());
+        emitUi(block.collapsedHeader() + System.lineSeparator());
     }
 
     @Override
     public void appendDiff(String filePath, String before, String after) {
-        new InlineDiffRenderer(out).render(filePath, before, after);
+        new InlineDiffRenderer(uiOutput).render(filePath, before, after);
     }
 
     @Override
@@ -305,7 +319,7 @@ public final class InlineRenderer implements Renderer {
         if (terminal == null) {
             return fallback.promptApproval(request);
         }
-        return new InlineApprovalPrompter(out, terminal).prompt(request);
+        return new InlineApprovalPrompter(uiOutput, terminal).prompt(request);
     }
 
     @Override
@@ -313,7 +327,7 @@ public final class InlineRenderer implements Renderer {
         if (terminal == null) {
             return fallback.openPalette(title, items);
         }
-        return new SlashPalette(out, terminal).open(title, items);
+        return new SlashPalette(uiOutput, terminal).open(title, items);
     }
 
     /** 测试可见：当前实例是否启动了 status bar。 */
@@ -337,7 +351,7 @@ public final class InlineRenderer implements Renderer {
         }
         if (!thinking.isEmpty()) {
             List<AttributedString> lines = thinking.lines()
-                    .map(line -> new AttributedString("│ " + cleanThinkingLine(line), InlineActivityDisplay.THINKING_STYLE))
+                    .map(line -> new AttributedString("│ " + cleanThinkingLine(line), InlineTheme.TEXT))
                     .toList();
             return reader.togglePreview("思考正文", "Ctrl+O", lines);
         }
@@ -345,11 +359,13 @@ public final class InlineRenderer implements Renderer {
         if (block == null) {
             return false;
         }
-        return reader.togglePreview("详情", preferThinking ? "Ctrl+O" : "Alt+O",
-                block.expandedLines().stream().map(AttributedString::fromAnsi).toList());
+        boolean assistantCode = block == assistantCodeBlock;
+        return reader.togglePreview("详情", preferThinking ? "Ctrl+O" : "Alt+O", block.expandedLines().stream()
+                .map(AttributedString::fromAnsi)
+                .map(line -> assistantCode ? line : InlineTheme.foreground(line)).toList());
     }
 
-    private PrintStream createTranscriptStream(PrintStream delegate) {
+    private PrintStream createTranscriptStream(StringBuilder buffer, boolean assistant) {
         return new PrintStream(new OutputStream() {
             @Override
             public void write(int b) {
@@ -366,13 +382,13 @@ public final class InlineRenderer implements Renderer {
                     if (closed) {
                         return;
                     }
-                    feedWithCodeBlockDetection(text);
+                    feedWithCodeBlockDetection(text, buffer, assistant);
                 }
             }
 
             @Override
             public void flush() {
-                delegate.flush();
+                out.flush();
             }
         }, true, StandardCharsets.UTF_8);
     }
@@ -382,24 +398,25 @@ public final class InlineRenderer implements Renderer {
      * {@link FoldableBlock}。代码体在流式期间不写到终端（避免大段文本刷屏），
      * 等 {@code └─ end} 到达后输出折叠头。
      */
-    private void feedWithCodeBlockDetection(String text) {
+    private void feedWithCodeBlockDetection(String text, StringBuilder buffer, boolean assistant) {
         for (int i = 0; i < text.length(); i++) {
             char ch = text.charAt(i);
-            lineBuffer.append(ch);
+            buffer.append(ch);
             if (ch == '\n') {
-                String line = lineBuffer.toString();
-                lineBuffer.setLength(0);
-                processStreamedLine(line);
+                String line = buffer.toString();
+                buffer.setLength(0);
+                processStreamedLine(line, assistant);
             }
         }
     }
 
-    private void processStreamedLine(String line) {
+    private void processStreamedLine(String line, boolean assistant) {
         String stripped = stripAnsi(line).trim();
 
         if (!inCodeBlock && stripped.startsWith("┌─ code")) {
             // Hold the whole block until the closing marker arrives.
             inCodeBlock = true;
+            codeIsAssistant = assistant;
             int colon = stripped.indexOf(':');
             codeLanguage = colon >= 0 ? stripped.substring(colon + 1).trim() : "";
             codeHeaderLine = stripTrailingNewline(line);
@@ -407,7 +424,7 @@ public final class InlineRenderer implements Renderer {
             return;
         }
 
-        if (inCodeBlock) {
+        if (inCodeBlock && codeIsAssistant == assistant) {
             if (stripped.startsWith("└─ end")) {
                 int bodyLineCount = codeBodyLines.size();
                 inCodeBlock = false;
@@ -423,7 +440,11 @@ public final class InlineRenderer implements Renderer {
                 }
                 expandedLines.add(stripTrailingNewline(line));
 
-                emitBlock(new FoldableBlock(out, collapsedHeader, expandedLines));
+                FoldableBlock block = new FoldableBlock(out, collapsedHeader, expandedLines);
+                if (assistant) {
+                    assistantCodeBlock = block;
+                }
+                emitBlock(block);
 
                 codeBodyLines.clear();
                 codeHeaderLine = null;
@@ -435,7 +456,15 @@ public final class InlineRenderer implements Renderer {
         }
 
         // 非代码块：常规流式
-        emit(line);
+        if (assistant) {
+            emit(line);
+        } else {
+            emitUi(line);
+        }
+    }
+
+    private void emitUi(String text) {
+        emit(InlineTheme.format(text));
     }
 
     private LineReader activePrintAboveReader() {

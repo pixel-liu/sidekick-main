@@ -4,6 +4,7 @@ import com.sidekick.hitl.ApprovalRequest;
 import com.sidekick.hitl.ApprovalResult;
 import com.sidekick.llm.LlmClient;
 import com.sidekick.render.StatusInfo;
+import com.sidekick.util.AnsiStyle;
 import org.jline.reader.LineReader;
 import org.jline.reader.Reference;
 import org.jline.terminal.Size;
@@ -93,7 +94,7 @@ class InlineRendererTest {
             renderer.beginTurn();
             renderer.stream().println("异步通知");
 
-            Mockito.verify(lineReader).printAbove("异步通知" + System.lineSeparator());
+            Mockito.verify(lineReader).printAbove(InlineTheme.format("异步通知" + System.lineSeparator()));
             assertFalse(sink.toString(StandardCharsets.UTF_8).contains("异步通知"));
         } finally {
             renderer.close();
@@ -373,6 +374,25 @@ class InlineRendererTest {
             assertFalse(emitted.contains("⏵"));
         } finally {
             renderer.close();
+        }
+    }
+
+    @Test
+    void conversationUiUsesExactRgbWithoutChangingAssistantMarkdown() {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (InlineRenderer renderer = new InlineRenderer(null, sink(output))) {
+            String heading = AnsiStyle.heading("最终答复");
+            renderer.stream().println(AnsiStyle.subtle("工具提示"));
+            renderer.assistantStream().println(heading);
+            renderer.stream().println("运行完成");
+
+            String raw = output.toString(StandardCharsets.UTF_8);
+            assertTrue(raw.contains(heading + System.lineSeparator()), raw);
+            if (AnsiStyle.isEnabled()) {
+                assertTrue(raw.contains("\u001B[38;2;102;102;102m工具提示"), raw);
+                assertTrue(raw.contains("\u001B[38;2;102;102;102m运行完成"), raw);
+                assertFalse(raw.contains("\u001B[2m"), raw);
+            }
         }
     }
 }

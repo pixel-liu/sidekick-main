@@ -144,7 +144,7 @@ public final class ChatLineReader extends LineReaderImpl {
     @Override
     public AttributedString getDisplayedBufferWithPrompts(List<AttributedString> secondaryPrompts) {
         if (!showFrame()) {
-            return super.getDisplayedBufferWithPrompts(secondaryPrompts);
+            return InlineTheme.foreground(super.getDisplayedBufferWithPrompts(secondaryPrompts));
         }
         AttributedStringBuilder frame = new AttributedStringBuilder();
         if (getBuffer().length() == 0 && post == null && searchTerm == null) {
@@ -158,8 +158,10 @@ public final class ChatLineReader extends LineReaderImpl {
             frame.append(super.getDisplayedBufferWithPrompts(secondaryPrompts));
         }
         frame.append('\n').append(rule());
-        appendPreview(frame);
-        return frame.toAttributedString();
+        AttributedStringBuilder themed = new AttributedStringBuilder()
+                .append(InlineTheme.foreground(frame.toAttributedString()));
+        appendPreview(themed);
+        return themed.toAttributedString();
     }
 
     private void appendPreview(AttributedStringBuilder frame) {
@@ -187,7 +189,7 @@ public final class ChatLineReader extends LineReaderImpl {
         if (wrappedPreview.size() > previewPageRows) {
             heading += " · PgUp/PgDn";
         }
-        AttributedString title = new AttributedString(heading, InlineActivityDisplay.THINKING_STYLE);
+        AttributedString title = new AttributedString(heading, InlineTheme.TEXT);
         frame.append('\n').append(title.columnSubSequence(0, width, terminal));
         for (int i = previewStart; i < previewStart + previewPageRows; i++) {
             frame.append('\n').append(wrappedPreview.get(i));

@@ -24,6 +24,7 @@ import com.sidekick.render.RendererFactory;
 import com.sidekick.render.StatusInfo;
 import com.sidekick.render.inline.ChatLineReader;
 import com.sidekick.render.inline.InlineRenderer;
+import com.sidekick.render.inline.TerminalCapabilities;
 import com.sidekick.image.ClipboardImage;
 import com.sidekick.mcp.McpServer;
 import com.sidekick.mcp.McpServerManager;
@@ -472,6 +473,7 @@ public class Main {
         }
         AtomicReference<LlmClient> llmClientRef = new AtomicReference<>(llmClient);
 
+        TerminalCapabilities.configureWindowsVtTrueColor();
         try (Terminal terminal = TerminalBuilder.builder().system(true).dumb(true).build();
              Renderer renderer = RendererFactory.create(RendererFactory.resolveMode(), terminal)) {
             refreshTerminalColumns(terminal);
@@ -1100,7 +1102,9 @@ public class Main {
                 nextTaskUsePlanMode = false;
                 nextTaskUseTeamMode = false;
                 if (response != null && !response.isBlank()) {
-                    ui.println(response);
+                    boolean report = ctrlC.taskCanceled || !"react".equals(snapshotMode)
+                            || response.startsWith("❌") || response.startsWith("⏹");
+                    (report ? ui : renderer.assistantStream()).println(response);
                     ui.println();
                 }
                 if (renderer instanceof InlineRenderer && !ctrlC.taskCanceled && response != null

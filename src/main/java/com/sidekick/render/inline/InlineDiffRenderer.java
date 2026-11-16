@@ -8,25 +8,14 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * 行内 diff 渲染：红减、绿加、青色 hunk header。
+ * 行内 diff 渲染：用独立的 +、- 和 hunk 标记区分变更。
  *
  * <p>不依赖第三方 diff 库——用最朴素的 LCS 实现 O(N×M)，对单文件够用。
  * 整体新增 / 整体删除场景用快速路径。
  *
- * <p>颜色用 ANSI 256 色码：
- * <ul>
- *   <li>新增行：绿色前缀 {@code +} + 行内容</li>
- *   <li>删除行：红色前缀 {@code -} + 行内容</li>
- *   <li>不变行：默认色（仅在 hunk 上下文里展示）</li>
- *   <li>hunk header：青色 {@code @@ -a,b +c,d @@}</li>
- * </ul>
  */
 public final class InlineDiffRenderer {
 
-    private static final String GREEN = "[32m";
-    private static final String RED = "[31m";
-    private static final String CYAN = "[36m";
-    private static final String RESET = "[0m";
     private static final int CONTEXT_LINES = 2;
 
     private final PrintStream out;
@@ -59,19 +48,19 @@ public final class InlineDiffRenderer {
 
     private void renderNewFile(String after) {
         String[] lines = after.split("\n", -1);
-        out.println(CYAN + "@@ -0,0 +1," + lines.length + " @@" + RESET);
+        out.println("@@ -0,0 +1," + lines.length + " @@");
         for (String line : lines) {
             if (line.isEmpty()) continue;
-            out.println(GREEN + "+" + line + RESET);
+            out.println("+" + line);
         }
     }
 
     private void renderDeleteFile(String before) {
         String[] lines = before.split("\n", -1);
-        out.println(CYAN + "@@ -1," + lines.length + " +0,0 @@" + RESET);
+        out.println("@@ -1," + lines.length + " +0,0 @@");
         for (String line : lines) {
             if (line.isEmpty()) continue;
-            out.println(RED + "-" + line + RESET);
+            out.println("-" + line);
         }
     }
 
@@ -81,12 +70,12 @@ public final class InlineDiffRenderer {
         List<DiffOp> ops = computeDiff(beforeLines, afterLines);
         List<Hunk> hunks = groupIntoHunks(ops, beforeLines, afterLines);
         for (Hunk hunk : hunks) {
-            out.println(CYAN + hunk.header() + RESET);
+            out.println(hunk.header());
             for (DiffOp op : hunk.ops) {
                 switch (op.type) {
                     case EQUAL -> out.println(" " + op.text);
-                    case ADD -> out.println(GREEN + "+" + op.text + RESET);
-                    case DELETE -> out.println(RED + "-" + op.text + RESET);
+                    case ADD -> out.println("+" + op.text);
+                    case DELETE -> out.println("-" + op.text);
                 }
             }
         }

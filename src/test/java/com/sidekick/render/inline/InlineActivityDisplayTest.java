@@ -39,8 +39,8 @@ class InlineActivityDisplayTest {
             String rendered = screen.toString(StandardCharsets.UTF_8);
             assertTrue(rendered.contains("末尾"), rendered);
             if (AnsiStyle.isEnabled()) {
-                AttributedString gray = AttributedString.fromAnsi(AnsiStyle.readableGray("末尾"));
-                assertTrue(rendered.contains(gray.toAnsi(terminal).substring(0, gray.toAnsi(terminal).indexOf("末尾"))));
+                String gray = new AttributedString("末尾", InlineTheme.TEXT).toAnsi(terminal);
+                assertTrue(rendered.contains(gray.substring(0, gray.indexOf("末尾"))));
             }
             assertFalse(rendered.contains("\u001B[2m"), rendered);
 
