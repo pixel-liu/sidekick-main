@@ -12,6 +12,7 @@ import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -44,6 +45,8 @@ class InlineActivityDisplayTest {
                 "thinking panel should keep a stable label and move the animation to the spinner: " + output);
         assertTrue(output.contains("| trying to read file") || output.contains("│ trying to read file"),
                 "thinking panel should show quoted reasoning: " + output);
+        assertEquals(252, InlineActivityDisplay.THINKING_CONTENT_GRAY_INDEX,
+                "thinking title and reasoning should use the light-gray terminal color");
     }
 
     @Test

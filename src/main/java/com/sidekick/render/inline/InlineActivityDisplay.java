@@ -27,10 +27,11 @@ final class InlineActivityDisplay implements AutoCloseable {
 
     private static final int MAX_REASONING_CHARS = 4096;
     private static final int MAX_REASONING_ROWS = 4;
+    static final int THINKING_CONTENT_GRAY_INDEX = 252;
     private static final String[] SPINNER_FRAMES = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
     private static final AttributedStyle STATUS_STYLE = AttributedStyle.DEFAULT.italic();
     private static final AttributedStyle QUOTE_STYLE = AnsiStyle.isEnabled()
-            ? AttributedStyle.DEFAULT.foreground(AnsiStyle.THINKING_GRAY_INDEX)
+            ? AttributedStyle.DEFAULT.foreground(THINKING_CONTENT_GRAY_INDEX)
             : AttributedStyle.DEFAULT;
     private static final AttributedStyle THINKING_TITLE_STYLE = QUOTE_STYLE.italic();
 
