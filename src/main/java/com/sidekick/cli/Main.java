@@ -519,7 +519,7 @@ public class Main {
             configureJLineInteractiveWidgets(lineReader);
 
             // JLine-first：启动输出、命令输出、Agent 流式内容都走同一条 Renderer.stream() 通道。
-            // inline 首屏要挂到 LineReader 首次初始化回调里，避免在 readLine 接管屏幕前用裸输出抢光标。
+            // inline 首屏在首次进入行编辑前输出，输入框由 JLine 绘制。
             RendererHitlHandler rendererHitl = new RendererHitlHandler(renderer, hitlHandler.isEnabled());
             hitlHandler.setDelegate(rendererHitl);
             if (renderer instanceof InlineRenderer inline) {
@@ -3028,8 +3028,8 @@ public class Main {
                 "   " + AnsiStyle.section(" ██████╗  ██╗  ██╗") + "    " + AnsiStyle.thinkingQuote("Sidekick v" + VERSION),
                 "   " + AnsiStyle.section("██╔════╝  ██║ ██╔╝") + "    " + ready,
                 "   " + AnsiStyle.section("╚█████╗   █████╔╝ ") + "    " + AnsiStyle.thinkingQuote(state),
-                "   " + AnsiStyle.section(" ╚═══██╗  ██╔═██╗ "),
-                "   " + AnsiStyle.section("██████╔╝  ██║  ██╗") + "    " + AnsiStyle.thinkingQuote(workingDirectoryLabel()),
+                "   " + AnsiStyle.section(" ╚═══██╗  ██╔═██╗ ") + "    " + AnsiStyle.thinkingQuote(workingDirectoryLabel()),
+                "   " + AnsiStyle.section("██████╔╝  ██║  ██╗") + "    " + AnsiStyle.thinkingQuote("人工审批默认关闭 · /hitl on 开启"),
                 "   " + AnsiStyle.section("╚═════╝   ╚═╝  ╚═╝")
         ));
         if (info.note() != null && !info.note().isBlank()) {

@@ -68,8 +68,8 @@ class MainInputNormalizationTest {
                 + AnsiStyle.thinkingQuote(" (model)")));
         assertTrue(lines.get(0).endsWith(AnsiStyle.thinkingQuote("Sidekick v16.1.0")));
         assertTrue(lines.get(2).endsWith(AnsiStyle.thinkingQuote("MCP not configured · 0 skills · ReAct")));
-        assertFalse(lines.get(3).contains("ReAct"));
-        assertTrue(lines.get(4).contains(Path.of("").toAbsolutePath().normalize().getFileName().toString()));
+        assertTrue(lines.get(3).contains(Path.of("").toAbsolutePath().normalize().getFileName().toString()));
+        assertTrue(lines.get(4).endsWith(AnsiStyle.thinkingQuote("人工审批默认关闭 · /hitl on 开启")));
         assertEquals(8, lines.size());
         assertEquals("", lines.get(6));
         assertEquals("", lines.get(7));
