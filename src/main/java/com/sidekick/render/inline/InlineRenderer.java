@@ -121,8 +121,10 @@ public final class InlineRenderer implements Renderer {
                         turnDisplay = new InlineTurnDisplay(terminal);
                     }
                     turnDisplay.unpaint();
+                    var size = TerminalCapabilities.safeSize(terminal);
+                    turnDisplay.publishOverflow(out, turnHasThinking, size, chat.foldedTranscriptRows(size));
                 }
-                chat.setTurnLines(turnDisplay.lines(), turnDisplay.answerLines(), turnHasThinking);
+                chat.setTurnLines(turnDisplay.lines(), turnDisplay.answerLines(), turnDisplay.hasThinkingHeader(turnHasThinking));
                 turnInEditor = true;
             }
         }

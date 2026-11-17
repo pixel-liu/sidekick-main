@@ -79,6 +79,8 @@ public final class ChatLineReader extends LineReaderImpl {
             return false;
         }
         boolean wasOpen = shortcut.equals(previewShortcut);
+        // Complete the old frame's erase before mouse mode and the frame height change.
+        display.update(List.of(), 0);
         clearPreview();
         if (!wasOpen) {
             previewTitle = title;
@@ -116,7 +118,7 @@ public final class ChatLineReader extends LineReaderImpl {
     }
 
     private boolean scrollPreview(int rows) {
-        if (previewMaxStart > 0) {
+        if (!preview.isEmpty() && previewMaxStart > 0) {
             previewStart = Math.max(0, Math.min(previewMaxStart, previewStart + rows));
         }
         return true;
@@ -151,11 +153,27 @@ public final class ChatLineReader extends LineReaderImpl {
         return size.getRows() >= 5 && size.getColumns() >= 20 ? 3 : 1;
     }
 
+    int foldedTranscriptRows(Size size) {
+        return Math.max(0, conversationRows(size) - inputRows(size));
+    }
+
+    private int conversationRows(Size size) {
+        int dock = Status.getExistingStatus(terminal).map(Status::size).orElse(0);
+        // Leave a physical row for terminal wrap and cursor movement at the lower margin.
+        return size.getRows() - dock - 1;
+    }
+
     @Override
     protected void redisplay(boolean flush) {
         lock.lock();
         AttributedString originalPrompt = prompt;
         try {
+            if (chatInput && display != null && !(display instanceof TransientDisplay)) {
+                var inline = new TransientDisplay(terminal);
+                inline.setDelayLineWrap(display.delayLineWrap());
+                inline.resize(size.getRows(), size.getColumns());
+                display = inline;
+            }
             if (showFrame()) {
                 prompt = new AttributedStringBuilder().append(rule()).append('\n')
                         .append(originalPrompt).toAttributedString();
@@ -169,7 +187,7 @@ public final class ChatLineReader extends LineReaderImpl {
                             .toAttributedString();
                 }
             }
-            setWheelTracking(previewMaxStart > 0);
+            setWheelTracking(!preview.isEmpty() && previewMaxStart > 0);
             super.redisplay(flush);
         } finally {
             prompt = originalPrompt;
@@ -203,9 +221,8 @@ public final class ChatLineReader extends LineReaderImpl {
 
     private AttributedString conversationPrefix(AttributedString inputFrame) {
         int cols = size.getColumns();
-        int dock = Status.getExistingStatus(terminal).map(Status::size).orElse(0);
         int inputRows = inputFrame.columnSplitLength(cols, false, true, terminal).size();
-        int room = size.getRows() - dock - inputRows;
+        int room = conversationRows(size) - inputRows;
         if (room <= 0 || cols < 2) {
             return AttributedString.EMPTY;
         }

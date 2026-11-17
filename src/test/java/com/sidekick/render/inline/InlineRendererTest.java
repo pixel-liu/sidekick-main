@@ -365,6 +365,11 @@ class InlineRendererTest {
             assertFalse(original.contains("FINAL_ANSWER"), original);
             screen.reset();
             renderer.beforeInput();
+            String published = transcript.toString(StandardCharsets.UTF_8);
+            assertTrue(published.contains("Thinking . . . >"), published);
+            assertTrue(published.contains("ANSWER_START"), published);
+            assertFalse(published.contains("ANSWER_END"), published);
+            assertFalse(published.contains("第一次思考"), published);
             assertEquals("draft", reader.readChatLine("❯ "));
             renderer.afterInput();
 
@@ -380,7 +385,9 @@ class InlineRendererTest {
             assertTrue(frames.indexOf("ANSWER_END", answerAt) > answerAt, frames);
             assertTrue(frames.contains("\u001b[?1000h"), frames);
             assertTrue(frames.contains("\u001b[?1000l"), frames);
-            assertEquals(original, transcript.toString(StandardCharsets.UTF_8));
+            assertEquals(1, frames.split("\u001b\\[\\?1000h", -1).length - 1, frames);
+            assertFalse(frames.matches("(?s).*\u001b\\[[0-9]*[LM].*"), frames);
+            assertEquals(published, transcript.toString(StandardCharsets.UTF_8));
 
             renderer.beginTurn();
             String committed = transcript.toString(StandardCharsets.UTF_8);

@@ -18,17 +18,20 @@ final class InlineTurnDisplay {
     private final Display display;
     private final List<AttributedString> lines = new ArrayList<>();
     private final List<AttributedString> answerLines = new ArrayList<>();
-    private final StringBuilder transcript = new StringBuilder();
+    private final List<String> transcript = new ArrayList<>();
+    private int publishedLines;
+    private boolean publishedThinking;
     private boolean painted;
 
     InlineTurnDisplay(Terminal terminal) {
         this.terminal = terminal;
-        this.display = new Display(terminal, false);
+        this.display = new TransientDisplay(terminal);
     }
 
     void append(String text, boolean showThinking, boolean assistant) {
-        transcript.append(text);
-        text.lines().map(AttributedString::fromAnsi).forEach(line -> {
+        text.lines().forEach(raw -> {
+            transcript.add(raw);
+            AttributedString line = AttributedString.fromAnsi(raw);
             lines.add(line);
             if (assistant && (!answerLines.isEmpty() || !line.toString().isBlank())) {
                 answerLines.add(line);
@@ -38,11 +41,32 @@ final class InlineTurnDisplay {
     }
 
     List<AttributedString> lines() {
-        return List.copyOf(lines);
+        return List.copyOf(lines.subList(publishedLines, lines.size()));
     }
 
     List<AttributedString> answerLines() {
         return List.copyOf(answerLines);
+    }
+
+    boolean hasThinkingHeader(boolean showThinking) {
+        return showThinking && !publishedThinking;
+    }
+
+    void publishOverflow(PrintStream out, boolean showThinking, Size size, int room) {
+        int width = Math.max(1, size.getColumns() - 1);
+        int start = lines.size();
+        while (start > publishedLines && room > 0) {
+            int rows = wrap(lines.get(start - 1), width, terminal).size();
+            if (rows > room) {
+                break;
+            }
+            room -= rows;
+            start--;
+        }
+        int headingRows = wrap(THINKING, width, terminal).size();
+        if (start > publishedLines || hasThinkingHeader(showThinking) && room < headingRows) {
+            publishThrough(out, start, showThinking);
+        }
     }
 
     void paint(boolean showThinking) {
@@ -75,10 +99,17 @@ final class InlineTurnDisplay {
 
     void commit(PrintStream out, boolean includeThinking) {
         unpaint();
-        if (includeThinking) {
+        publishThrough(out, transcript.size(), includeThinking);
+    }
+
+    private void publishThrough(PrintStream out, int end, boolean includeThinking) {
+        if (hasThinkingHeader(includeThinking)) {
             out.println(InlineTheme.format(THINKING.toString()));
+            publishedThinking = true;
         }
-        out.print(transcript);
+        for (; publishedLines < end; publishedLines++) {
+            out.println(transcript.get(publishedLines));
+        }
         out.flush();
     }
 

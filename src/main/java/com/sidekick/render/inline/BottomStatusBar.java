@@ -134,7 +134,7 @@ public final class BottomStatusBar implements AutoCloseable {
         }
         setActivityCursorHidden(true);
         if (activityDisplay == null) {
-            activityDisplay = new Display(terminal, false);
+            activityDisplay = new TransientDisplay(terminal);
         }
         activityDisplay.resize(size.getRows(), size.getColumns());
         activityDisplay.update(activity.subList(0, rowCount), 0);
