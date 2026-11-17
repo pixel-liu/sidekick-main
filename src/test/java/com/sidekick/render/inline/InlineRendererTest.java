@@ -317,7 +317,7 @@ class InlineRendererTest {
     void multipleModelCallsShareOneThinkingBlockAndToggleInlineWithoutAppendingAnswer() throws Exception {
         ByteArrayOutputStream screen = new ByteArrayOutputStream();
         ByteArrayOutputStream transcript = new ByteArrayOutputStream();
-        String keys = "draft\u000F" + "\u001B[6~".repeat(10) + "\u000F\n";
+        String keys = "draft\u000F" + "\u001b[<65;5;8M".repeat(45) + "\u001b[<64;5;8M" + "\u000F\n";
         try (Terminal terminal = viewTerminal(keys, screen);
              InlineRenderer renderer = new InlineRenderer(terminal, sink(transcript))) {
             ChatLineReader reader = bindPreview(renderer);
@@ -327,8 +327,7 @@ class InlineRendererTest {
             renderer.printSubmittedPrompt("输入问题");
             renderer.assistantStream().println("ANSWER_START");
             renderer.beginThinking("Thinking");
-            renderer.appendThinking("第一次思考\n" + "一段需要分页的较长正文\n".repeat(3)
-                    + "下一页思考标记\n" + "一段需要分页的较长正文\n".repeat(22));
+            renderer.appendThinking("第一次思考\n" + "长思考内容\n".repeat(26));
             renderer.collapseThinking();
             renderer.appendToolCalls(List.of(tc("read_file", "{\"path\":\"old-tool.txt\"}")));
             renderer.beginThinking("Thinking");
@@ -336,6 +335,7 @@ class InlineRendererTest {
             renderer.collapseThinking();
             renderer.appendCollapsedThinking("补充思考");
             renderer.assistantStream().print("FINAL_ANSWER\n".repeat(80));
+            renderer.assistantStream().println("ANSWER_END");
 
             String original = transcript.toString(StandardCharsets.UTF_8);
             assertFalse(original.contains("ANSWER_START"), original);
@@ -350,9 +350,13 @@ class InlineRendererTest {
             assertTrue(frames.contains("第一次思考"), frames);
             assertTrue(frames.contains("第二次思考"), frames);
             assertTrue(frames.contains("补充思考"), frames);
+            assertFalse(frames.contains("PgUp/PgDn"), frames);
             int answerAt = frames.indexOf("ANSWER_START");
-            assertTrue(frames.indexOf("第一次思考") < answerAt, frames);
-            assertTrue(answerAt < frames.indexOf("下一页思考标记"), frames);
+            assertTrue(frames.indexOf("思考正文") < frames.indexOf("第一次思考"), frames);
+            assertTrue(frames.indexOf("补充思考") < answerAt, frames);
+            assertTrue(frames.indexOf("ANSWER_END", answerAt) > answerAt, frames);
+            assertTrue(frames.contains("\u001b[?1000h"), frames);
+            assertTrue(frames.contains("\u001b[?1000l"), frames);
             assertEquals(original, transcript.toString(StandardCharsets.UTF_8));
 
             renderer.beginTurn();

@@ -1,17 +1,15 @@
 package com.sidekick.render.inline;
 
 import com.sidekick.util.AnsiStyle;
-import org.jline.keymap.KeyMap;
-import org.jline.reader.Binding;
-import org.jline.reader.Macro;
 import org.jline.reader.Reference;
 import org.jline.reader.impl.LineReaderImpl;
+import org.jline.terminal.MouseEvent;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
+import org.jline.terminal.impl.AbstractWindowsTerminal;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
-import org.jline.utils.InfoCmp.Capability;
 import org.jline.utils.Status;
 
 import java.util.ArrayList;
@@ -27,6 +25,7 @@ public final class ChatLineReader extends LineReaderImpl {
     private static final AttributedString RULE = new AttributedString("─", MUTED);
     private static final AttributedString PLACEHOLDER = new AttributedString("试试「解释 @pom.xml」", MUTED);
     private static final AttributedString SHORT_PLACEHOLDER = new AttributedString("输入任务", MUTED);
+    private static final int WHEEL_ROWS = 3;
 
     private final BottomStatusBar statusBar;
     private boolean chatInput;
@@ -35,14 +34,12 @@ public final class ChatLineReader extends LineReaderImpl {
     private boolean turnHasThinking;
     private List<AttributedString> preview = List.of();
     private List<AttributedString> wrappedPreview = List.of();
-    private List<AttributedString> wrappedAnswer = List.of();
     private String previewTitle;
     private String previewShortcut;
     private int previewWidth;
     private int previewStart;
-    private int previewPageRows;
-    private int answerStart;
-    private int answerPageRows;
+    private int previewMaxStart;
+    private boolean wheelTracking;
 
     public ChatLineReader(Terminal terminal) {
         this(terminal, null);
@@ -51,8 +48,14 @@ public final class ChatLineReader extends LineReaderImpl {
     ChatLineReader(Terminal terminal, BottomStatusBar statusBar) {
         super(terminal, null, null);
         this.statusBar = statusBar;
-        bindPreviewPage(Capability.key_ppage, -1);
-        bindPreviewPage(Capability.key_npage, 1);
+        getWidgets().put("sidekick-scroll-up", () -> scrollPreview(-1));
+        getWidgets().put("sidekick-scroll-down", () -> scrollPreview(1));
+        Stream.of(MAIN, EMACS, VIINS, VICMD).map(getKeyMaps()::get).filter(map -> map != null).distinct()
+                .forEach(map -> {
+                    map.bind(new Reference(MOUSE), "\u001b[<", "\u001b[M");
+                    map.bind(new Reference("sidekick-scroll-up"), "\u001b[1;3A");
+                    map.bind(new Reference("sidekick-scroll-down"), "\u001b[1;3B");
+                });
     }
 
     public String readChatLine(String prompt) {
@@ -62,6 +65,7 @@ public final class ChatLineReader extends LineReaderImpl {
         try {
             return readLine(prompt);
         } finally {
+            setWheelTracking(false);
             option(Option.ERASE_LINE_ON_FINISH, eraseOnFinish);
             chatInput = false;
             turnLines = null;
@@ -95,44 +99,42 @@ public final class ChatLineReader extends LineReaderImpl {
     private void clearPreview() {
         preview = List.of();
         wrappedPreview = List.of();
-        wrappedAnswer = List.of();
         previewTitle = null;
         previewShortcut = null;
         previewWidth = 0;
         previewStart = Integer.MAX_VALUE;
-        previewPageRows = 0;
-        answerStart = 0;
-        answerPageRows = 0;
+        previewMaxStart = 0;
     }
 
-    private void bindPreviewPage(Capability key, int direction) {
-        String sequence = KeyMap.key(terminal, key);
-        if (sequence == null || sequence.isEmpty()) {
+    @Override
+    public boolean mouse() {
+        MouseEvent event = readMouseEvent();
+        if (event.getType() == MouseEvent.Type.Wheel) {
+            scrollPreview(event.getButton() == MouseEvent.Button.WheelUp ? -WHEEL_ROWS : WHEEL_ROWS);
+        }
+        return true;
+    }
+
+    private boolean scrollPreview(int rows) {
+        if (previewMaxStart > 0) {
+            previewStart = Math.max(0, Math.min(previewMaxStart, previewStart + rows));
+        }
+        return true;
+    }
+
+    private void setWheelTracking(boolean enabled) {
+        if (enabled == wheelTracking) {
             return;
         }
-        Stream.of(MAIN, EMACS, VIINS).map(getKeyMaps()::get).filter(map -> map != null).distinct()
-                .forEach(map -> {
-                    Binding previous = map.getBound(sequence);
-                    String widget = "sidekick-preview-" + key + "-" + getWidgets().size();
-                    getWidgets().put(widget, () -> {
-                        if (previewPageRows > 0 || answerPageRows > 0) {
-                            previewStart = movePage(previewStart, direction, previewPageRows, wrappedPreview.size());
-                            answerStart = movePage(answerStart, direction, answerPageRows, wrappedAnswer.size());
-                            return true;
-                        }
-                        if (previous instanceof Reference ref) {
-                            callWidget(ref.name());
-                        } else if (previous instanceof Macro macro) {
-                            runMacro(macro.getSequence());
-                        }
-                        return true;
-                    });
-                    map.bind(new Reference(widget), sequence);
-                });
-    }
-
-    private static int movePage(int start, int direction, int pageRows, int totalRows) {
-        return Math.max(0, Math.min(totalRows - pageRows, start + direction * pageRows));
+        if (!terminal.trackMouse(enabled ? Terminal.MouseTracking.Normal : Terminal.MouseTracking.Off)) {
+            return;
+        }
+        wheelTracking = enabled;
+        if (terminal instanceof AbstractWindowsTerminal && "windows-vtp".equals(terminal.getType())) {
+            // JLine's Windows backend updates the native console mode but does not notify VT frontends.
+            terminal.writer().write(enabled ? "\u001b[?1006h\u001b[?1000h" : "\u001b[?1000l\u001b[?1006l");
+            terminal.flush();
+        }
     }
 
     @Override
@@ -158,6 +160,7 @@ public final class ChatLineReader extends LineReaderImpl {
                 prompt = new AttributedStringBuilder().append(rule()).append('\n')
                         .append(originalPrompt).toAttributedString();
             }
+            previewMaxStart = 0;
             if (chatInput && reading && (turnLines != null || !preview.isEmpty())) {
                 AttributedString prefix = conversationPrefix(inputFrame(new ArrayList<>()));
                 if (prefix.length() > 0) {
@@ -166,6 +169,7 @@ public final class ChatLineReader extends LineReaderImpl {
                             .toAttributedString();
                 }
             }
+            setWheelTracking(previewMaxStart > 0);
             super.redisplay(flush);
         } finally {
             prompt = originalPrompt;
@@ -198,8 +202,6 @@ public final class ChatLineReader extends LineReaderImpl {
     }
 
     private AttributedString conversationPrefix(AttributedString inputFrame) {
-        previewPageRows = 0;
-        answerPageRows = 0;
         int cols = size.getColumns();
         int dock = Status.getExistingStatus(terminal).map(Status::size).orElse(0);
         int inputRows = inputFrame.columnSplitLength(cols, false, true, terminal).size();
@@ -212,59 +214,30 @@ public final class ChatLineReader extends LineReaderImpl {
             rebuildPreview(width);
             previewWidth = width;
         }
-        if (!wrappedAnswer.isEmpty()) {
-            return splitThinkingAndAnswer(room, width);
-        }
         int maxRows = turnLines == null ? Math.min(room, Math.max(1, size.getRows() / 2)) : room;
-        previewPageRows = Math.min(maxRows, wrappedPreview.size());
-        previewStart = Math.min(previewStart, wrappedPreview.size() - previewPageRows);
-        return joinRows(wrappedPreview.subList(previewStart, previewStart + previewPageRows));
+        int visibleRows = Math.min(maxRows, wrappedPreview.size());
+        previewMaxStart = wrappedPreview.size() - visibleRows;
+        previewStart = Math.min(previewStart, previewMaxStart);
+        return joinRows(wrappedPreview.subList(previewStart, previewStart + visibleRows));
     }
 
     private void rebuildPreview(int width) {
         boolean thinkingOpen = "Ctrl+O".equals(previewShortcut) && "思考正文".equals(previewTitle);
+        List<AttributedString> ordered = new ArrayList<>();
+        if (thinkingOpen) {
+            addPreview(ordered);
+        } else if (turnLines != null && turnHasThinking) {
+            ordered.add(InlineTurnDisplay.THINKING);
+        }
         if (thinkingOpen && !turnAnswer.isEmpty()) {
-            wrappedPreview = wrap(preview, width);
-            wrappedAnswer = wrap(turnAnswer, width);
-        } else {
-            List<AttributedString> ordered = new ArrayList<>();
-            if (thinkingOpen) {
-                addPreview(ordered);
-            } else if (turnLines != null && turnHasThinking) {
-                ordered.add(InlineTurnDisplay.THINKING);
-            }
-            if (turnLines != null) {
-                ordered.addAll(turnLines);
-            }
-            if (!thinkingOpen && !preview.isEmpty()) {
-                addPreview(ordered);
-            }
-            wrappedPreview = wrap(ordered, width);
+            ordered.addAll(turnAnswer);
+        } else if (turnLines != null) {
+            ordered.addAll(turnLines);
         }
-    }
-
-    private List<AttributedString> wrap(List<AttributedString> lines, int width) {
-        return lines.stream().flatMap(line -> InlineTurnDisplay.wrap(line, width, terminal).stream()).toList();
-    }
-
-    private AttributedString splitThinkingAndAnswer(int room, int width) {
-        int headingRows = room >= 3 ? 1 : 0;
-        int contentRows = room - headingRows;
-        if (contentRows >= 2) {
-            // Give the answer most of the viewport and let thinking use any spare rows.
-            int thinkingBudget = Math.max(Math.max(1, contentRows / 3), contentRows - wrappedAnswer.size());
-            previewPageRows = Math.min(wrappedPreview.size(), thinkingBudget);
+        if (!thinkingOpen && !preview.isEmpty()) {
+            addPreview(ordered);
         }
-        answerPageRows = Math.min(wrappedAnswer.size(), contentRows - previewPageRows);
-        previewStart = Math.min(previewStart, wrappedPreview.size() - previewPageRows);
-        answerStart = Math.min(answerStart, wrappedAnswer.size() - answerPageRows);
-        List<AttributedString> visible = new ArrayList<>(room);
-        if (headingRows > 0) {
-            visible.add(previewHeading().columnSubSequence(0, width, terminal));
-        }
-        visible.addAll(wrappedPreview.subList(previewStart, previewStart + previewPageRows));
-        visible.addAll(wrappedAnswer.subList(answerStart, answerStart + answerPageRows));
-        return joinRows(visible);
+        wrappedPreview = ordered.stream().flatMap(line -> InlineTurnDisplay.wrap(line, width, terminal).stream()).toList();
     }
 
     private AttributedString joinRows(List<AttributedString> rows) {
@@ -279,12 +252,8 @@ public final class ChatLineReader extends LineReaderImpl {
     }
 
     private void addPreview(List<AttributedString> lines) {
-        lines.add(previewHeading());
+        lines.add(new AttributedString(previewTitle + " · " + previewShortcut + " 收起", InlineTheme.TEXT));
         lines.addAll(preview);
-    }
-
-    private AttributedString previewHeading() {
-        return new AttributedString(previewTitle + " · " + previewShortcut + " 收起 · PgUp/PgDn", InlineTheme.TEXT);
     }
 
     @Override
