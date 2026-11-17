@@ -14,6 +14,7 @@ import com.sidekick.mcp.transport.StdioTransport;
 import com.sidekick.mcp.transport.StreamableHttpTransport;
 import com.sidekick.tool.ToolOutput;
 import com.sidekick.tool.ToolRegistry;
+import com.sidekick.util.AnsiStyle;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -136,9 +137,9 @@ public class McpServerManager implements AutoCloseable {
                 .reduce((a, b) -> a + ", " + b)
                 .orElse("");
         long displaySeconds = Math.max(1, (long) Math.ceil(maxWait.toMillis() / 1000.0));
-        out.printf("⚠️ MCP 启动超过 %ds，先进入 CLI；后台继续启动: %s%n",
-                displaySeconds, names);
-        out.println("   可用 /mcp 查看最新状态，或 /mcp logs <name> 查看日志。");
+        out.printf("%s%n", AnsiStyle.brightWhite("⚠️ MCP 启动超过 %ds，先进入 CLI；后台继续启动: %s"
+                .formatted(displaySeconds, names)));
+        out.println(AnsiStyle.brightWhite("   可用 /mcp 查看最新状态，或 /mcp logs <name> 查看日志。"));
         out.flush();
     }
 
@@ -161,8 +162,8 @@ public class McpServerManager implements AutoCloseable {
                     }
                     for (McpServer server : starting) {
                         long waited = Duration.between(startedAt.get(server.name()), Instant.now()).toSeconds();
-                        out.printf("   ⏳ %-16s %-6s 启动中...（已等待 %ds）%n",
-                                server.name(), server.transportName(), waited);
+                        out.printf("%s%n", AnsiStyle.brightWhite("   ⏳ %-16s %-6s 启动中...（已等待 %ds）"
+                                .formatted(server.name(), server.transportName(), waited)));
                     }
                     out.flush();
                 }

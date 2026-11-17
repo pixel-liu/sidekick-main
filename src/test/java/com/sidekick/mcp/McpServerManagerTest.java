@@ -3,6 +3,7 @@ package com.sidekick.mcp;
 import com.sidekick.mcp.config.McpConfigLoader;
 import com.sidekick.mcp.config.McpServerConfig;
 import com.sidekick.tool.ToolRegistry;
+import com.sidekick.util.AnsiStyle;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.AfterEach;
@@ -129,6 +130,10 @@ class McpServerManagerTest {
         assertEquals(McpServerStatus.STARTING, server.status());
         assertFalse(registry.hasTool("mcp__slow__echo"));
         assertTrue(out.toString(StandardCharsets.UTF_8).contains("后台继续启动"));
+        assertTrue(out.toString(StandardCharsets.UTF_8).contains(
+                AnsiStyle.brightWhite("⚠️ MCP 启动超过 1s，先进入 CLI；后台继续启动: slow")));
+        assertTrue(out.toString(StandardCharsets.UTF_8).contains(
+                AnsiStyle.brightWhite("   可用 /mcp 查看最新状态，或 /mcp logs <name> 查看日志。")));
     }
 
     @Test

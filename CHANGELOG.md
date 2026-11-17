@@ -2,6 +2,22 @@
 
 按日期倒序记录项目变更、验证结果和待处理问题。
 
+## 2026-11-17 — 提亮 MCP 启动提示
+
+### 已完成
+
+- 将 MCP 启动中的服务器进度、超时提示及状态查询指引统一改为亮白色，提升深色终端背景下的可读性。
+
+### 验证结果
+
+- `mvn test "-Dtest=McpServerManagerTest" -DskipTests=false` 通过，8 项测试通过。
+- `mvn test -Pphase16-smoke` 通过，100 项冒烟测试通过。
+- 界面样式检测通过，`impeccable detect --json src/main/java/com/sidekick/mcp/McpServerManager.java` 无问题；`git diff --check` 通过。
+
+### 遗留与边界
+
+- 无 ANSI 色彩支持的终端仍使用默认前景色。
+
 ## 2026-11-17 — 修复终端启动留白和思考折叠
 
 ### 已完成
