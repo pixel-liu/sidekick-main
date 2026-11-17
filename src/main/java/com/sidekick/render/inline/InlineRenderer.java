@@ -44,6 +44,10 @@ public final class InlineRenderer implements Renderer {
     private volatile LineReader lineReader;
     private volatile boolean started;
     private volatile boolean closed;
+    private InlineTurnDisplay turnDisplay;
+    private boolean managedTurn;
+    private boolean turnHasThinking;
+    private boolean turnInEditor;
 
     // —— 代码块折叠状态机字段（仅供 createTranscriptStream 内部使用）——
     private final StringBuilder lineBuffer = new StringBuilder();
@@ -79,6 +83,10 @@ public final class InlineRenderer implements Renderer {
     @Override
     public void beginTurn() {
         synchronized (transcriptLock) {
+            commitTurn(true);
+            managedTurn = false;
+            turnHasThinking = false;
+            turnInEditor = false;
             lineBuffer.setLength(0);
             assistantLineBuffer.setLength(0);
             inCodeBlock = false;
@@ -106,8 +114,17 @@ public final class InlineRenderer implements Renderer {
 
     @Override
     public void beforeInput() {
-        if (statusBar != null) {
-            statusBar.prepareInputLine(ChatLineReader.inputRows(TerminalCapabilities.safeSize(terminal)));
+        synchronized (transcriptLock) {
+            if (managedTurn && lineReader instanceof ChatLineReader chat) {
+                synchronized (out) {
+                    if (turnDisplay == null) {
+                        turnDisplay = new InlineTurnDisplay(terminal);
+                    }
+                    turnDisplay.unpaint();
+                }
+                chat.setTurnLines(turnDisplay.lines(), turnHasThinking);
+                turnInEditor = true;
+            }
         }
     }
 
@@ -133,6 +150,7 @@ public final class InlineRenderer implements Renderer {
             if (closed) {
                 return;
             }
+            commitTurn(true);
             closed = true;
         }
         try {
@@ -211,7 +229,14 @@ public final class InlineRenderer implements Renderer {
             turnThinking.append(thinking.strip());
         }
         if (first) {
-            emitUi("Thinking . . . >" + System.lineSeparator());
+            synchronized (transcriptLock) {
+                turnHasThinking = true;
+                if (manageTurn()) {
+                    statusBar.writeAboveActivity(() -> currentTurnDisplay().paint(true));
+                } else {
+                    emitUi("Thinking . . . >" + System.lineSeparator());
+                }
+            }
         }
     }
 
@@ -301,7 +326,7 @@ public final class InlineRenderer implements Renderer {
 
     @Override
     public void appendDiff(String filePath, String before, String after) {
-        new InlineDiffRenderer(uiOutput).render(filePath, before, after);
+        new InlineDiffRenderer(stream).render(filePath, before, after);
     }
 
     @Override
@@ -319,6 +344,7 @@ public final class InlineRenderer implements Renderer {
         if (terminal == null) {
             return fallback.promptApproval(request);
         }
+        flushBeforeDialog();
         return new InlineApprovalPrompter(uiOutput, terminal).prompt(request);
     }
 
@@ -327,6 +353,7 @@ public final class InlineRenderer implements Renderer {
         if (terminal == null) {
             return fallback.openPalette(title, items);
         }
+        flushBeforeDialog();
         return new SlashPalette(uiOutput, terminal).open(title, items);
     }
 
@@ -411,6 +438,10 @@ public final class InlineRenderer implements Renderer {
     }
 
     private void processStreamedLine(String line, boolean assistant) {
+        if (assistant) {
+            // Keep the first answer line editable even if reasoning first arrives after it.
+            manageTurn();
+        }
         String stripped = stripAnsi(line).trim();
 
         if (!inCodeBlock && stripped.startsWith("┌─ code")) {
@@ -488,8 +519,57 @@ public final class InlineRenderer implements Renderer {
             reader.printAbove(text);
             return;
         }
-        out.print(text);
-        out.flush();
+        synchronized (transcriptLock) {
+            if (turnInEditor) {
+                commitTurn(true);
+                managedTurn = false;
+                turnInEditor = false;
+            }
+            Runnable write = () -> {
+                if (managedTurn) {
+                    currentTurnDisplay().append(text, turnHasThinking);
+                } else {
+                    out.print(text);
+                    out.flush();
+                }
+            };
+            if (statusBar != null) {
+                statusBar.writeAboveActivity(write);
+            } else {
+                write.run();
+            }
+        }
+    }
+
+    private boolean manageTurn() {
+        if (!turnInEditor && started && statusBar != null && lineReader instanceof ChatLineReader) {
+            managedTurn = true;
+        }
+        return managedTurn;
+    }
+
+    private InlineTurnDisplay currentTurnDisplay() {
+        if (turnDisplay == null) {
+            turnDisplay = new InlineTurnDisplay(terminal);
+        }
+        return turnDisplay;
+    }
+
+    private void flushBeforeDialog() {
+        synchronized (transcriptLock) {
+            commitTurn(false);
+        }
+    }
+
+    private void commitTurn(boolean includeThinking) {
+        synchronized (out) {
+            if (turnDisplay != null) {
+                turnDisplay.commit(out, includeThinking && turnHasThinking);
+                turnDisplay = null;
+            } else if (managedTurn && includeThinking && turnHasThinking) {
+                out.println(InlineTheme.format(InlineTurnDisplay.THINKING.toString()));
+            }
+        }
     }
 
     private static String joinLines(List<String> lines) {

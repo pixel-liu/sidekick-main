@@ -7,10 +7,10 @@ import org.jline.utils.InfoCmp;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
+import org.jline.utils.Display;
 import org.jline.utils.Status;
 
 import java.io.PrintStream;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -44,9 +44,10 @@ public final class BottomStatusBar implements AutoCloseable {
     private volatile StatusInfo current;
     private Status status;
     private List<AttributedString> activity = List.of();
+    private Display activityDisplay;
     private boolean started;
     private boolean closed;
-    private boolean inputPositioned;
+    private boolean activityCursorHidden;
 
     public BottomStatusBar(Terminal terminal) {
         this.terminal = terminal;
@@ -95,23 +96,62 @@ public final class BottomStatusBar implements AutoCloseable {
 
     void showActivity(List<AttributedString> lines) {
         synchronized (out) {
+            if (closed) {
+                return;
+            }
             activity = lines;
-            renderDock();
+            paintActivity();
+            if (lines.isEmpty()) {
+                setActivityCursorHidden(false);
+            }
         }
     }
 
-    /** 首次编辑从状态栏上方开始，后续编辑跟随对话输出的位置。 */
-    public void prepareInputLine(int inputRows) {
+    void writeAboveActivity(Runnable write) {
         synchronized (out) {
-            renderDock();
-            if (closed || status == null || status.size() == 0 || inputPositioned) {
-                return;
+            clearActivity();
+            try {
+                write.run();
+            } finally {
+                paintActivity();
             }
-            int rows = TerminalCapabilities.safeSize(terminal).getRows();
-            int inputRow = Math.max(0, rows - status.size() - inputRows);
-            terminal.puts(InfoCmp.Capability.cursor_address, inputRow, 0);
+        }
+    }
+
+    private void paintActivity() {
+        if (activity.isEmpty()) {
+            clearActivity();
+            return;
+        }
+        if (status == null) {
+            return;
+        }
+        var size = TerminalCapabilities.safeSize(terminal);
+        int rowCount = Math.min(activity.size(), Math.max(0, size.getRows() - status.size() - 1));
+        if (rowCount == 0) {
+            clearActivity();
+            return;
+        }
+        setActivityCursorHidden(true);
+        if (activityDisplay == null) {
+            activityDisplay = new Display(terminal, false);
+        }
+        activityDisplay.resize(size.getRows(), size.getColumns());
+        activityDisplay.update(activity.subList(0, rowCount), 0);
+    }
+
+    private void clearActivity() {
+        if (activityDisplay != null) {
+            activityDisplay.update(List.of(), 0);
+            activityDisplay = null;
+        }
+    }
+
+    private void setActivityCursorHidden(boolean hidden) {
+        if (activityCursorHidden != hidden) {
+            terminal.writer().print(hidden ? AnsiSeq.HIDE_CURSOR : AnsiSeq.SHOW_CURSOR);
             terminal.flush();
-            inputPositioned = true;
+            activityCursorHidden = hidden;
         }
     }
 
@@ -133,11 +173,7 @@ public final class BottomStatusBar implements AutoCloseable {
                 && !terminal.getBooleanCapability(InfoCmp.Capability.eat_newline_glitch);
         List<AttributedString> statusLines = current == null ? List.of()
                 : formatStatusLines(current, cols, protectFirstColumn);
-        // Always leave at least two rows available for normal scrolling.
-        int previewRows = Math.min(activity.size(), Math.max(0, size.getRows() - statusLines.size() - 2));
-        List<AttributedString> dock = new ArrayList<>(activity.subList(0, previewRows));
-        dock.addAll(statusLines);
-        status.update(dock);
+        status.update(statusLines);
     }
 
     @Override
@@ -147,6 +183,8 @@ public final class BottomStatusBar implements AutoCloseable {
                 return;
             }
             closed = true;
+            clearActivity();
+            setActivityCursorHidden(false);
             Status dock = status;
             status = null;
             if (dock != null) {

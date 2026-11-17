@@ -14,6 +14,7 @@ import org.jline.utils.AttributedStyle;
 import org.jline.utils.InfoCmp.Capability;
 import org.jline.utils.Status;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -29,6 +30,8 @@ public final class ChatLineReader extends LineReaderImpl {
 
     private final BottomStatusBar statusBar;
     private boolean chatInput;
+    private List<AttributedString> turnLines;
+    private boolean turnHasThinking;
     private List<AttributedString> preview = List.of();
     private List<AttributedString> wrappedPreview = List.of();
     private String previewTitle;
@@ -57,6 +60,7 @@ public final class ChatLineReader extends LineReaderImpl {
         } finally {
             option(Option.ERASE_LINE_ON_FINISH, eraseOnFinish);
             chatInput = false;
+            turnLines = null;
             clearPreview();
         }
     }
@@ -71,8 +75,15 @@ public final class ChatLineReader extends LineReaderImpl {
             previewTitle = title;
             previewShortcut = shortcut;
             preview = lines;
+            previewStart = "Ctrl+O".equals(shortcut) ? 0 : Integer.MAX_VALUE;
         }
         return true;
+    }
+
+    void setTurnLines(List<AttributedString> lines, boolean hasThinking) {
+        turnLines = lines;
+        turnHasThinking = hasThinking;
+        clearPreview();
     }
 
     private void clearPreview() {
@@ -81,7 +92,7 @@ public final class ChatLineReader extends LineReaderImpl {
         previewTitle = null;
         previewShortcut = null;
         previewWidth = 0;
-        previewStart = 0;
+        previewStart = Integer.MAX_VALUE;
         previewPageRows = 0;
     }
 
@@ -134,6 +145,14 @@ public final class ChatLineReader extends LineReaderImpl {
                 prompt = new AttributedStringBuilder().append(rule()).append('\n')
                         .append(originalPrompt).toAttributedString();
             }
+            if (chatInput && reading && (turnLines != null || !preview.isEmpty())) {
+                AttributedString prefix = conversationPrefix(inputFrame(new ArrayList<>()));
+                if (prefix.length() > 0) {
+                    // Put the transcript in the prompt so JLine also counts it when positioning the caret.
+                    prompt = new AttributedStringBuilder().append(prefix).append('\n').append(prompt)
+                            .toAttributedString();
+                }
+            }
             super.redisplay(flush);
         } finally {
             prompt = originalPrompt;
@@ -143,6 +162,10 @@ public final class ChatLineReader extends LineReaderImpl {
 
     @Override
     public AttributedString getDisplayedBufferWithPrompts(List<AttributedString> secondaryPrompts) {
+        return inputFrame(secondaryPrompts);
+    }
+
+    private AttributedString inputFrame(List<AttributedString> secondaryPrompts) {
         if (!showFrame()) {
             return super.getDisplayedBufferWithPrompts(secondaryPrompts);
         }
@@ -158,47 +181,66 @@ public final class ChatLineReader extends LineReaderImpl {
             frame.append(super.getDisplayedBufferWithPrompts(secondaryPrompts));
         }
         frame.append('\n').append(rule());
-        AttributedString inputFrame = frame.toAttributedString();
-        AttributedString previewFrame = previewBeforeInput(inputFrame);
-        if (previewFrame.length() == 0) {
-            return inputFrame;
-        }
-        return new AttributedStringBuilder().append(previewFrame).append('\n').append(inputFrame).toAttributedString();
+        return frame.toAttributedString();
     }
 
-    /** Keep an expanded block immediately before the chat input, above the next prompt. */
-    private AttributedString previewBeforeInput(AttributedString inputFrame) {
+    private AttributedString conversationPrefix(AttributedString inputFrame) {
         previewPageRows = 0;
-        if (preview.isEmpty()) {
-            return AttributedString.EMPTY;
-        }
         int cols = size.getColumns();
         int dock = Status.getExistingStatus(terminal).map(Status::size).orElse(0);
         int inputRows = inputFrame.columnSplitLength(cols, false, true, terminal).size();
-        int room = size.getRows() - dock - inputRows - 1;
-        if (room <= 0) {
+        int room = size.getRows() - dock - inputRows;
+        if (room <= 0 || cols < 2) {
             return AttributedString.EMPTY;
         }
         int width = cols - 1;
         if (previewWidth != width) {
-            wrappedPreview = preview.stream()
-                    .flatMap(line -> line.columnSplitLength(width, false, true, terminal).stream())
+            List<AttributedString> ordered = new ArrayList<>();
+            boolean thinkingOpen = "Ctrl+O".equals(previewShortcut) && "思考正文".equals(previewTitle);
+            if (thinkingOpen) {
+                addPreview(ordered);
+            } else if (turnLines != null && turnHasThinking) {
+                ordered.add(InlineTurnDisplay.THINKING);
+            }
+            if (turnLines != null) {
+                ordered.addAll(turnLines);
+            }
+            if (!thinkingOpen && !preview.isEmpty()) {
+                addPreview(ordered);
+            }
+            wrappedPreview = ordered.stream()
+                    .flatMap(line -> InlineTurnDisplay.wrap(line, width, terminal).stream())
                     .toList();
             previewWidth = width;
         }
-        previewPageRows = Math.min(Math.min(room, Math.max(1, size.getRows() / 2)), wrappedPreview.size());
+        int maxRows = turnLines == null ? Math.min(room, Math.max(1, size.getRows() / 2)) : room;
+        previewPageRows = Math.min(maxRows, wrappedPreview.size());
         previewStart = Math.min(previewStart, wrappedPreview.size() - previewPageRows);
-        String heading = previewTitle + " · " + previewShortcut + " 收起";
-        if (wrappedPreview.size() > previewPageRows) {
-            heading += " · PgUp/PgDn";
-        }
-        AttributedString title = new AttributedString(heading, InlineTheme.TEXT);
-        AttributedStringBuilder previewFrame = new AttributedStringBuilder();
-        previewFrame.append(title.columnSubSequence(0, width, terminal));
+        AttributedStringBuilder prefix = new AttributedStringBuilder();
         for (int i = previewStart; i < previewStart + previewPageRows; i++) {
-            previewFrame.append('\n').append(wrappedPreview.get(i));
+            if (i > previewStart) {
+                prefix.append('\n');
+            }
+            prefix.append(wrappedPreview.get(i));
         }
-        return previewFrame.toAttributedString();
+        return prefix.toAttributedString();
+    }
+
+    private void addPreview(List<AttributedString> lines) {
+        lines.add(new AttributedString(previewTitle + " · " + previewShortcut + " 收起 · PgUp/PgDn", InlineTheme.TEXT));
+        lines.addAll(preview);
+    }
+
+    @Override
+    protected void cleanup() {
+        // ERASE_LINE_ON_FINISH clears the whole editable area, including the retained transcript.
+        boolean wasChatInput = chatInput;
+        chatInput = false;
+        try {
+            super.cleanup();
+        } finally {
+            chatInput = wasChatInput;
+        }
     }
 
     @Override

@@ -295,7 +295,7 @@ class InlineRendererTest {
     }
 
     @Test
-    void multipleModelCallsShareOneThinkingBlockAndToggleInlineWithoutReplayingAnswer() throws Exception {
+    void multipleModelCallsShareOneThinkingBlockAndToggleInlineWithoutAppendingAnswer() throws Exception {
         ByteArrayOutputStream screen = new ByteArrayOutputStream();
         ByteArrayOutputStream transcript = new ByteArrayOutputStream();
         try (Terminal terminal = viewTerminal("draft\u000F\u001B[6~\u000F\u000F\u000F\n", screen);
@@ -305,6 +305,7 @@ class InlineRendererTest {
             renderer.updateStatus(StatusInfo.idle("test-model", 10_000, false));
             renderer.beginTurn();
             renderer.printSubmittedPrompt("输入问题");
+            renderer.assistantStream().println("ANSWER_START");
             renderer.beginThinking("Thinking");
             renderer.appendThinking("第一次思考\n" + "一段需要分页的较长正文\n".repeat(9));
             renderer.collapseThinking();
@@ -313,24 +314,29 @@ class InlineRendererTest {
             renderer.appendThinking("第二次思考");
             renderer.collapseThinking();
             renderer.appendCollapsedThinking("补充思考");
-            renderer.stream().print("FINAL_ANSWER\n".repeat(80));
+            renderer.assistantStream().print("FINAL_ANSWER\n".repeat(80));
 
             String original = transcript.toString(StandardCharsets.UTF_8);
-            assertEquals(1, original.split("Thinking \\. \\. \\. >", -1).length - 1, original);
-            assertTrue(original.lines().skip(1).findFirst().orElseThrow().contains("Thinking . . . >"));
-            assertFalse(original.contains("第一次思考"), original);
+            assertFalse(original.contains("ANSWER_START"), original);
+            assertFalse(original.contains("FINAL_ANSWER"), original);
             screen.reset();
+            renderer.beforeInput();
             assertEquals("draft", reader.readChatLine("❯ "));
+            renderer.afterInput();
 
             String frames = screen.toString(StandardCharsets.UTF_8);
             assertFalse(frames.contains("\u001B[?1049h"), frames);
-            assertTrue(frames.lastIndexOf("思考正文") < frames.lastIndexOf("❯ draft"), frames);
             assertTrue(frames.contains("第一次思考"), frames);
             assertTrue(frames.contains("第二次思考"), frames);
             assertTrue(frames.contains("补充思考"), frames);
-            assertFalse(frames.contains("FINAL_ANSWER"), frames);
-            assertFalse(frames.contains("old-tool.txt"), frames);
             assertEquals(original, transcript.toString(StandardCharsets.UTF_8));
+
+            renderer.beginTurn();
+            String committed = transcript.toString(StandardCharsets.UTF_8);
+            assertEquals(1, committed.split("Thinking \\. \\. \\. >", -1).length - 1, committed);
+            assertTrue(committed.indexOf("Thinking . . . >") < committed.indexOf("ANSWER_START"), committed);
+            assertEquals(80, committed.split("FINAL_ANSWER", -1).length - 1, committed);
+            assertFalse(committed.contains("第一次思考"), committed);
         }
     }
 

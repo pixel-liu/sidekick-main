@@ -15,13 +15,13 @@ import java.util.concurrent.TimeUnit;
 /**
  * Fixed-height transient activity area for model thinking.
  *
- * <p>The preview belongs to the same JLine dock as the status row so no temporary
- * thinking text enters the scrolling transcript.
+ * <p>A temporary JLine display follows the output cursor above the fixed status row.
  */
 final class InlineActivityDisplay implements AutoCloseable {
 
     private static final int MAX_PREVIEW_CHARS = 4096;
     private static final int MAX_REASONING_ROWS = 4;
+    static final int MAX_ROWS = MAX_REASONING_ROWS + 1;
     private static final String[] SPINNER_FRAMES = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
     private static final AttributedStyle STATUS_STYLE = InlineTheme.TEXT.italic();
 

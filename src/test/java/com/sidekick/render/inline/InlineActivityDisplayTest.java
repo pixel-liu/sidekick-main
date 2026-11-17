@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class InlineActivityDisplayTest {
 
     @Test
-    void wrappedThinkingLivesInReservedRowsAndCollapseClearsThem() throws Exception {
+    void wrappedThinkingLeavesTheStatusRowFixedAndClearsOnCollapse() throws Exception {
         ByteArrayOutputStream screen = new ByteArrayOutputStream();
         try (Terminal terminal = new DumbTerminal("test", "xterm-256color",
                 InputStream.nullInputStream(), screen, StandardCharsets.UTF_8);
@@ -30,12 +30,13 @@ class InlineActivityDisplayTest {
             dock.start();
             dock.update(StatusInfo.idle("test-model", 10_000, false));
             display.begin("Thinking");
+            assertTrue(screen.toString(StandardCharsets.UTF_8).contains(AnsiSeq.HIDE_CURSOR));
             screen.reset();
             String reasoning = "起始".repeat(2300) + "\n末尾".repeat(30);
             display.appendThinking(reasoning);
 
             Status status = Status.getStatus(terminal);
-            assertEquals(5, status.size());
+            assertEquals(1, status.size());
             String rendered = screen.toString(StandardCharsets.UTF_8);
             assertTrue(rendered.contains("末尾"), rendered);
             if (AnsiStyle.isEnabled()) {
@@ -48,8 +49,9 @@ class InlineActivityDisplayTest {
             assertEquals(reasoning, display.collapse());
             assertEquals(1, status.size());
             String cleared = screen.toString(StandardCharsets.UTF_8);
-            assertTrue(cleared.contains(AnsiSeq.setScrollRegion(1, 6)), cleared);
+            assertFalse(cleared.contains(AnsiSeq.setScrollRegion(1, 6)), cleared);
             assertTrue(cleared.contains(AnsiSeq.CLEAR_TO_EOL), cleared);
+            assertTrue(cleared.contains(AnsiSeq.SHOW_CURSOR), cleared);
             assertFalse(cleared.contains("末尾"), cleared);
             assertEquals("", display.collapse());
         }

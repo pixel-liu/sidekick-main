@@ -211,7 +211,7 @@ class BottomStatusBarTest {
         try {
             bar.update(StatusInfo.idle("glm-5.1", 200_000L, false));
             sink.reset();
-            bar.prepareInputLine(3);
+            bar.flushNow();
             String prepared = sink.toString(StandardCharsets.UTF_8);
             assertFalse(prepared.startsWith("\n\n"), "dock must not inject spacer rows under the prompt: " + prepared);
             assertFalse(prepared.contains(AnsiSeq.moveUp(3)), prepared);
