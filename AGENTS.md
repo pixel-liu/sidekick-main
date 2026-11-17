@@ -12,7 +12,7 @@ Read SideKick.md for the shared architecture and development commands.
 - Keep chat-frame decoration and the empty-input hint in JLine's display. All three task modes share the line editor. Esc clears a draft or cancels an armed Plan/Team mode when the input is empty. Ctrl+C cancels a running CLI task, and a second press within two seconds exits. On CLI exit, hide the status rows and restore full terminal scrolling before closing the terminal.
 - Use one status row with the model and `ctx` percentage and progress bar on the left, and grouped recent request `in/out/cache` on the right. Show cost with usage when space allows. Keep the three token fields visible before any reported usage and retain the latest reported values on status refresh. New interactive sessions start with HITL approval disabled. Users can enable it for the session with `/hitl on`. The bottom bar omits the HITL badge, MCP count, and skill count.
 - Show the starting directory next to the SK logo. Preserve the startup banner palette and assistant reply formatting. Use RGB(102, 102, 102) for Thinking, tools, approvals, and other inline conversation details. Preserve the existing semantic colors for the chat input, completion timing, and bottom status row.
-- 实时思考在 JLine 临时区域显示，与固定状态行分开管理，刷新期间隐藏光标。每条提问的多次模型思考合并在一个折叠入口中。Ctrl+O 在原页面展开或收起思考，思考正文位于本轮回答上方，PgUp/PgDn 翻页，Alt+O 查看最近的工具或代码块。实时思考与展开后的思考正文不写入终端滚动历史。JLine 管理当前轮，禁止使用备用屏幕或通过追加输出重放本轮内容。
+- 实时思考在 JLine 临时区域显示，与固定状态行分开管理，刷新期间隐藏光标。每条提问的多次模型思考合并在一个折叠入口中。Ctrl+O 在原页面展开或收起思考，展开时思考在上、回答在下并同时可见，PgUp/PgDn 分别推进两段的分页，Alt+O 查看最近的工具或代码块。实时思考与展开后的思考正文不写入终端滚动历史。JLine 管理当前轮，禁止使用备用屏幕或通过追加输出重放本轮内容。
 - Validate interactive input and the status layout with `mvn test -Pphase16-smoke`.
 
 ## Built-in skills

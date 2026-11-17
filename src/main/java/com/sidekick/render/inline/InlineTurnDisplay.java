@@ -17,6 +17,7 @@ final class InlineTurnDisplay {
     private final Terminal terminal;
     private final Display display;
     private final List<AttributedString> lines = new ArrayList<>();
+    private final List<AttributedString> answerLines = new ArrayList<>();
     private final StringBuilder transcript = new StringBuilder();
     private boolean painted;
 
@@ -25,14 +26,23 @@ final class InlineTurnDisplay {
         this.display = new Display(terminal, false);
     }
 
-    void append(String text, boolean showThinking) {
+    void append(String text, boolean showThinking, boolean assistant) {
         transcript.append(text);
-        text.lines().map(AttributedString::fromAnsi).forEach(lines::add);
+        text.lines().map(AttributedString::fromAnsi).forEach(line -> {
+            lines.add(line);
+            if (assistant && (!answerLines.isEmpty() || !line.toString().isBlank())) {
+                answerLines.add(line);
+            }
+        });
         paint(showThinking);
     }
 
     List<AttributedString> lines() {
         return List.copyOf(lines);
+    }
+
+    List<AttributedString> answerLines() {
+        return List.copyOf(answerLines);
     }
 
     void paint(boolean showThinking) {

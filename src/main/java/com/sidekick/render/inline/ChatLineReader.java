@@ -31,14 +31,18 @@ public final class ChatLineReader extends LineReaderImpl {
     private final BottomStatusBar statusBar;
     private boolean chatInput;
     private List<AttributedString> turnLines;
+    private List<AttributedString> turnAnswer = List.of();
     private boolean turnHasThinking;
     private List<AttributedString> preview = List.of();
     private List<AttributedString> wrappedPreview = List.of();
+    private List<AttributedString> wrappedAnswer = List.of();
     private String previewTitle;
     private String previewShortcut;
     private int previewWidth;
     private int previewStart;
     private int previewPageRows;
+    private int answerStart;
+    private int answerPageRows;
 
     public ChatLineReader(Terminal terminal) {
         this(terminal, null);
@@ -61,6 +65,7 @@ public final class ChatLineReader extends LineReaderImpl {
             option(Option.ERASE_LINE_ON_FINISH, eraseOnFinish);
             chatInput = false;
             turnLines = null;
+            turnAnswer = List.of();
             clearPreview();
         }
     }
@@ -80,8 +85,9 @@ public final class ChatLineReader extends LineReaderImpl {
         return true;
     }
 
-    void setTurnLines(List<AttributedString> lines, boolean hasThinking) {
+    void setTurnLines(List<AttributedString> lines, List<AttributedString> answer, boolean hasThinking) {
         turnLines = lines;
+        turnAnswer = answer;
         turnHasThinking = hasThinking;
         clearPreview();
     }
@@ -89,11 +95,14 @@ public final class ChatLineReader extends LineReaderImpl {
     private void clearPreview() {
         preview = List.of();
         wrappedPreview = List.of();
+        wrappedAnswer = List.of();
         previewTitle = null;
         previewShortcut = null;
         previewWidth = 0;
         previewStart = Integer.MAX_VALUE;
         previewPageRows = 0;
+        answerStart = 0;
+        answerPageRows = 0;
     }
 
     private void bindPreviewPage(Capability key, int direction) {
@@ -106,9 +115,9 @@ public final class ChatLineReader extends LineReaderImpl {
                     Binding previous = map.getBound(sequence);
                     String widget = "sidekick-preview-" + key + "-" + getWidgets().size();
                     getWidgets().put(widget, () -> {
-                        if (previewPageRows > 0) {
-                            int last = Math.max(0, wrappedPreview.size() - previewPageRows);
-                            previewStart = Math.max(0, Math.min(last, previewStart + direction * previewPageRows));
+                        if (previewPageRows > 0 || answerPageRows > 0) {
+                            previewStart = movePage(previewStart, direction, previewPageRows, wrappedPreview.size());
+                            answerStart = movePage(answerStart, direction, answerPageRows, wrappedAnswer.size());
                             return true;
                         }
                         if (previous instanceof Reference ref) {
@@ -120,6 +129,10 @@ public final class ChatLineReader extends LineReaderImpl {
                     });
                     map.bind(new Reference(widget), sequence);
                 });
+    }
+
+    private static int movePage(int start, int direction, int pageRows, int totalRows) {
+        return Math.max(0, Math.min(totalRows - pageRows, start + direction * pageRows));
     }
 
     @Override
@@ -186,6 +199,7 @@ public final class ChatLineReader extends LineReaderImpl {
 
     private AttributedString conversationPrefix(AttributedString inputFrame) {
         previewPageRows = 0;
+        answerPageRows = 0;
         int cols = size.getColumns();
         int dock = Status.getExistingStatus(terminal).map(Status::size).orElse(0);
         int inputRows = inputFrame.columnSplitLength(cols, false, true, terminal).size();
@@ -195,8 +209,25 @@ public final class ChatLineReader extends LineReaderImpl {
         }
         int width = cols - 1;
         if (previewWidth != width) {
+            rebuildPreview(width);
+            previewWidth = width;
+        }
+        if (!wrappedAnswer.isEmpty()) {
+            return splitThinkingAndAnswer(room, width);
+        }
+        int maxRows = turnLines == null ? Math.min(room, Math.max(1, size.getRows() / 2)) : room;
+        previewPageRows = Math.min(maxRows, wrappedPreview.size());
+        previewStart = Math.min(previewStart, wrappedPreview.size() - previewPageRows);
+        return joinRows(wrappedPreview.subList(previewStart, previewStart + previewPageRows));
+    }
+
+    private void rebuildPreview(int width) {
+        boolean thinkingOpen = "Ctrl+O".equals(previewShortcut) && "思考正文".equals(previewTitle);
+        if (thinkingOpen && !turnAnswer.isEmpty()) {
+            wrappedPreview = wrap(preview, width);
+            wrappedAnswer = wrap(turnAnswer, width);
+        } else {
             List<AttributedString> ordered = new ArrayList<>();
-            boolean thinkingOpen = "Ctrl+O".equals(previewShortcut) && "思考正文".equals(previewTitle);
             if (thinkingOpen) {
                 addPreview(ordered);
             } else if (turnLines != null && turnHasThinking) {
@@ -208,27 +239,52 @@ public final class ChatLineReader extends LineReaderImpl {
             if (!thinkingOpen && !preview.isEmpty()) {
                 addPreview(ordered);
             }
-            wrappedPreview = ordered.stream()
-                    .flatMap(line -> InlineTurnDisplay.wrap(line, width, terminal).stream())
-                    .toList();
-            previewWidth = width;
+            wrappedPreview = wrap(ordered, width);
         }
-        int maxRows = turnLines == null ? Math.min(room, Math.max(1, size.getRows() / 2)) : room;
-        previewPageRows = Math.min(maxRows, wrappedPreview.size());
+    }
+
+    private List<AttributedString> wrap(List<AttributedString> lines, int width) {
+        return lines.stream().flatMap(line -> InlineTurnDisplay.wrap(line, width, terminal).stream()).toList();
+    }
+
+    private AttributedString splitThinkingAndAnswer(int room, int width) {
+        int headingRows = room >= 3 ? 1 : 0;
+        int contentRows = room - headingRows;
+        if (contentRows >= 2) {
+            // Give the answer most of the viewport and let thinking use any spare rows.
+            int thinkingBudget = Math.max(Math.max(1, contentRows / 3), contentRows - wrappedAnswer.size());
+            previewPageRows = Math.min(wrappedPreview.size(), thinkingBudget);
+        }
+        answerPageRows = Math.min(wrappedAnswer.size(), contentRows - previewPageRows);
         previewStart = Math.min(previewStart, wrappedPreview.size() - previewPageRows);
+        answerStart = Math.min(answerStart, wrappedAnswer.size() - answerPageRows);
+        List<AttributedString> visible = new ArrayList<>(room);
+        if (headingRows > 0) {
+            visible.add(previewHeading().columnSubSequence(0, width, terminal));
+        }
+        visible.addAll(wrappedPreview.subList(previewStart, previewStart + previewPageRows));
+        visible.addAll(wrappedAnswer.subList(answerStart, answerStart + answerPageRows));
+        return joinRows(visible);
+    }
+
+    private AttributedString joinRows(List<AttributedString> rows) {
         AttributedStringBuilder prefix = new AttributedStringBuilder();
-        for (int i = previewStart; i < previewStart + previewPageRows; i++) {
-            if (i > previewStart) {
+        for (int i = 0; i < rows.size(); i++) {
+            if (i > 0) {
                 prefix.append('\n');
             }
-            prefix.append(wrappedPreview.get(i));
+            prefix.append(rows.get(i));
         }
         return prefix.toAttributedString();
     }
 
     private void addPreview(List<AttributedString> lines) {
-        lines.add(new AttributedString(previewTitle + " · " + previewShortcut + " 收起 · PgUp/PgDn", InlineTheme.TEXT));
+        lines.add(previewHeading());
         lines.addAll(preview);
+    }
+
+    private AttributedString previewHeading() {
+        return new AttributedString(previewTitle + " · " + previewShortcut + " 收起 · PgUp/PgDn", InlineTheme.TEXT);
     }
 
     @Override

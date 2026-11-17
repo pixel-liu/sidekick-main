@@ -122,7 +122,7 @@ public final class InlineRenderer implements Renderer {
                     }
                     turnDisplay.unpaint();
                 }
-                chat.setTurnLines(turnDisplay.lines(), turnHasThinking);
+                chat.setTurnLines(turnDisplay.lines(), turnDisplay.answerLines(), turnHasThinking);
                 turnInEditor = true;
             }
         }
@@ -316,12 +316,12 @@ public final class InlineRenderer implements Renderer {
         Map<String, List<LlmClient.ToolCall>> grouped = ToolCallRenderer.group(toolCalls);
         emitBlock(new FoldableBlock(out,
                 ToolCallRenderer.collapsedHeader(grouped),
-                ToolCallRenderer.expandedLines(grouped)));
+                ToolCallRenderer.expandedLines(grouped)), false);
     }
 
-    private void emitBlock(FoldableBlock block) {
+    private void emitBlock(FoldableBlock block, boolean assistant) {
         blockRegistry.register(block);
-        emitUi(block.collapsedHeader() + System.lineSeparator());
+        emit(InlineTheme.format(block.collapsedHeader() + System.lineSeparator()), assistant);
     }
 
     @Override
@@ -475,7 +475,7 @@ public final class InlineRenderer implements Renderer {
                 if (assistant) {
                     assistantCodeBlock = block;
                 }
-                emitBlock(block);
+                emitBlock(block, assistant);
 
                 codeBodyLines.clear();
                 codeHeaderLine = null;
@@ -488,7 +488,7 @@ public final class InlineRenderer implements Renderer {
 
         // 非代码块：常规流式
         if (assistant) {
-            emit(line);
+            emit(line, true);
         } else {
             emitUi(line);
         }
@@ -511,6 +511,10 @@ public final class InlineRenderer implements Renderer {
     }
 
     private void emit(String text) {
+        emit(text, false);
+    }
+
+    private void emit(String text, boolean assistant) {
         if (text == null || text.isEmpty()) {
             return;
         }
@@ -527,7 +531,7 @@ public final class InlineRenderer implements Renderer {
             }
             Runnable write = () -> {
                 if (managedTurn) {
-                    currentTurnDisplay().append(text, turnHasThinking);
+                    currentTurnDisplay().append(text, turnHasThinking, assistant);
                 } else {
                     out.print(text);
                     out.flush();
