@@ -8,7 +8,6 @@ import com.sidekick.render.Renderer;
 import com.sidekick.render.StatusInfo;
 import com.sidekick.util.AnsiStyle;
 import org.jline.reader.LineReader;
-import org.jline.reader.Widget;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
 
@@ -18,7 +17,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Inline 流式渲染器：默认形态。
@@ -40,7 +38,7 @@ public final class InlineRenderer implements Renderer {
     private final Object transcriptLock = new Object();
     private final StringBuilder turnThinking = new StringBuilder();
     private final InlineActivityDisplay activityDisplay;
-    private final AtomicBoolean startupScreenPrinted = new AtomicBoolean(true);
+    private String startupScreen;
     private volatile LineReader lineReader;
     private volatile boolean started;
     private volatile boolean closed;
@@ -115,6 +113,10 @@ public final class InlineRenderer implements Renderer {
     @Override
     public void beforeInput() {
         synchronized (transcriptLock) {
+            if (startupScreen != null && lineReader != null) {
+                lineReader.printAbove(startupScreen);
+                startupScreen = null;
+            }
             if (managedTurn && lineReader instanceof ChatLineReader chat) {
                 synchronized (out) {
                     if (turnDisplay == null) {
@@ -276,29 +278,14 @@ public final class InlineRenderer implements Renderer {
         this.lineReader = lineReader;
     }
 
-    /**
-     * 在 LineReader 第一次进入 readLine 时打印首屏。
-     *
-     * <p>首屏不能在 readLine 之前用普通 stdout 打印：底部 Status 初始化后，LineReader
-     * 第一次重绘会重新接管输入区，提前打印的 banner 容易被滚动或覆盖。挂到
-     * {@link LineReader#CALLBACK_INIT} 后，JLine 会把首屏、输入行和底部 dock 放在同一个
-     * 显示生命周期里处理。
-     */
+    /** Queue the banner before the first read. JLine resets its display after its init callback. */
     public void installStartupScreen(List<String> lines) {
-        LineReader reader = lineReader;
-        if (reader == null || lines == null || lines.isEmpty()) {
+        if (lines == null || lines.isEmpty()) {
             return;
         }
-        startupScreenPrinted.set(false);
-        List<String> snapshot = List.copyOf(lines);
-        Widget previous = reader.getWidgets().get(LineReader.CALLBACK_INIT);
-        reader.getWidgets().put(LineReader.CALLBACK_INIT, () -> {
-            boolean ok = previous == null || previous.apply();
-            if (startupScreenPrinted.compareAndSet(false, true)) {
-                reader.printAbove(joinLines(snapshot));
-            }
-            return ok;
-        });
+        synchronized (transcriptLock) {
+            startupScreen = joinLines(lines);
+        }
     }
 
     public void printSubmittedPrompt(String input) {
@@ -316,9 +303,9 @@ public final class InlineRenderer implements Renderer {
             return;
         }
         Map<String, List<LlmClient.ToolCall>> grouped = ToolCallRenderer.group(toolCalls);
-        emitBlock(new FoldableBlock(out,
+        blockRegistry.register(new FoldableBlock(out,
                 ToolCallRenderer.collapsedHeader(grouped),
-                ToolCallRenderer.expandedLines(grouped)), false);
+                ToolCallRenderer.expandedLines(grouped)));
     }
 
     private void emitBlock(FoldableBlock block, boolean assistant) {

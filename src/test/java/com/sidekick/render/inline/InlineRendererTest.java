@@ -205,6 +205,33 @@ class InlineRendererTest {
     }
 
     @Test
+    void firstInputDrawsOneFrameAfterTheStartupBanner() throws Exception {
+        ByteArrayOutputStream screen = new ByteArrayOutputStream();
+        try (Terminal terminal = viewTerminal("\n\n", screen);
+             InlineRenderer renderer = new InlineRenderer(terminal, sink(screen))) {
+            ChatLineReader reader = bindPreview(renderer);
+            renderer.start();
+            renderer.updateStatus(StatusInfo.idle("test-model", 10_000, false));
+            renderer.installStartupScreen(List.of("SK_STARTUP"));
+
+            renderer.beforeInput();
+            String beforeEdit = screen.toString(StandardCharsets.UTF_8);
+            assertTrue(beforeEdit.contains("SK_STARTUP"), beforeEdit);
+            assertFalse(beforeEdit.contains("❯"), beforeEdit);
+            assertEquals("", reader.readChatLine("❯ "));
+            renderer.afterInput();
+
+            String firstFrame = screen.toString(StandardCharsets.UTF_8).substring(beforeEdit.length());
+            assertEquals(1, firstFrame.split("❯", -1).length - 1, firstFrame);
+            assertTrue(firstFrame.contains("pom.xml"), firstFrame);
+            renderer.beforeInput();
+            assertEquals("", reader.readChatLine("❯ "));
+            renderer.afterInput();
+            assertEquals(1, screen.toString(StandardCharsets.UTF_8).split("SK_STARTUP", -1).length - 1);
+        }
+    }
+
+    @Test
     void activityPanelOmitsCancelHintForNonCancelableWork() throws Exception {
         ByteArrayOutputStream screen = new ByteArrayOutputStream();
         try (Terminal terminal = viewTerminal("", screen);
@@ -231,6 +258,8 @@ class InlineRendererTest {
             renderer.appendToolCalls(List.of(tc("read_file", "{\"path\":\"README.md\"}")));
             renderer.stream().println("after");
             String original = transcript.toString(StandardCharsets.UTF_8);
+            assertFalse(original.contains("README.md"), original);
+            assertFalse(original.contains("alt+o to expand"), original);
 
             assertEquals("", reader.readChatLine("❯ "));
 
@@ -340,7 +369,8 @@ class InlineRendererTest {
     void multipleModelCallsShareOneThinkingBlockAndToggleInlineWithoutAppendingAnswer() throws Exception {
         ByteArrayOutputStream screen = new ByteArrayOutputStream();
         ByteArrayOutputStream transcript = new ByteArrayOutputStream();
-        String keys = "draft\u000F" + "\u001b[<65;5;8M".repeat(45) + "\u001b[<64;5;8M" + "\u000F\n";
+        String keys = "draft\u000F\u001b[<64;5;8M\u001b[1;3B"
+                + "\u001b[<65;5;8M".repeat(45) + "\u001b[<64;5;8M\u000F\n";
         try (Terminal terminal = viewTerminal(keys, screen);
              InlineRenderer renderer = new InlineRenderer(terminal, sink(transcript))) {
             ChatLineReader reader = bindPreview(renderer);
@@ -385,7 +415,8 @@ class InlineRendererTest {
             assertTrue(frames.indexOf("ANSWER_END", answerAt) > answerAt, frames);
             assertTrue(frames.contains("\u001b[?1000h"), frames);
             assertTrue(frames.contains("\u001b[?1000l"), frames);
-            assertEquals(1, frames.split("\u001b\\[\\?1000h", -1).length - 1, frames);
+            assertEquals(2, frames.split("\u001b\\[\\?1000h", -1).length - 1, frames);
+            assertTrue(frames.contains("Alt+↓ 继续浏览"), frames);
             assertFalse(frames.matches("(?s).*\u001b\\[[0-9]*[LM].*"), frames);
             assertEquals(published, transcript.toString(StandardCharsets.UTF_8));
 
@@ -395,6 +426,7 @@ class InlineRendererTest {
             assertTrue(committed.indexOf("Thinking . . . >") < committed.indexOf("ANSWER_START"), committed);
             assertEquals(80, committed.split("FINAL_ANSWER", -1).length - 1, committed);
             assertFalse(committed.contains("第一次思考"), committed);
+            assertFalse(committed.contains("old-tool.txt"), committed);
         }
     }
 

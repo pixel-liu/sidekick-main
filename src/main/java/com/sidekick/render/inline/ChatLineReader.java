@@ -40,6 +40,7 @@ public final class ChatLineReader extends LineReaderImpl {
     private int previewStart;
     private int previewMaxStart;
     private boolean wheelTracking;
+    private boolean wheelInHistory;
 
     public ChatLineReader(Terminal terminal) {
         this(terminal, null);
@@ -106,22 +107,36 @@ public final class ChatLineReader extends LineReaderImpl {
         previewWidth = 0;
         previewStart = Integer.MAX_VALUE;
         previewMaxStart = 0;
+        wheelInHistory = false;
     }
 
     @Override
     public boolean mouse() {
         MouseEvent event = readMouseEvent();
-        if (event.getType() == MouseEvent.Type.Wheel) {
-            scrollPreview(event.getButton() == MouseEvent.Button.WheelUp ? -WHEEL_ROWS : WHEEL_ROWS);
+        if (wheelTracking && event.getType() == MouseEvent.Type.Wheel) {
+            boolean up = event.getButton() == MouseEvent.Button.WheelUp;
+            if (up && previewStart == 0 && isThinkingPreview()) {
+                setWheelInHistory(true);
+            } else {
+                scrollPreview(up ? -WHEEL_ROWS : WHEEL_ROWS);
+            }
         }
         return true;
     }
 
     private boolean scrollPreview(int rows) {
         if (!preview.isEmpty() && previewMaxStart > 0) {
+            if (rows > 0 && wheelInHistory) {
+                setWheelInHistory(false);
+            }
             previewStart = Math.max(0, Math.min(previewMaxStart, previewStart + rows));
         }
         return true;
+    }
+
+    private void setWheelInHistory(boolean enabled) {
+        wheelInHistory = enabled;
+        previewWidth = 0;
     }
 
     private void setWheelTracking(boolean enabled) {
@@ -169,6 +184,9 @@ public final class ChatLineReader extends LineReaderImpl {
         AttributedString originalPrompt = prompt;
         try {
             if (chatInput && display != null && !(display instanceof TransientDisplay)) {
+                // JLine can replace its display after the first status update. The replacement
+                // may already own a drawn input frame, so leave its cursor at the frame origin.
+                display.update(List.of(), 0, false);
                 var inline = new TransientDisplay(terminal);
                 inline.setDelayLineWrap(display.delayLineWrap());
                 inline.resize(size.getRows(), size.getColumns());
@@ -187,7 +205,7 @@ public final class ChatLineReader extends LineReaderImpl {
                             .toAttributedString();
                 }
             }
-            setWheelTracking(!preview.isEmpty() && previewMaxStart > 0);
+            setWheelTracking(!wheelInHistory && !preview.isEmpty() && previewMaxStart > 0);
             super.redisplay(flush);
         } finally {
             prompt = originalPrompt;
@@ -239,7 +257,7 @@ public final class ChatLineReader extends LineReaderImpl {
     }
 
     private void rebuildPreview(int width) {
-        boolean thinkingOpen = "Ctrl+O".equals(previewShortcut) && "思考正文".equals(previewTitle);
+        boolean thinkingOpen = isThinkingPreview();
         List<AttributedString> ordered = new ArrayList<>();
         if (thinkingOpen) {
             addPreview(ordered);
@@ -257,6 +275,10 @@ public final class ChatLineReader extends LineReaderImpl {
         wrappedPreview = ordered.stream().flatMap(line -> InlineTurnDisplay.wrap(line, width, terminal).stream()).toList();
     }
 
+    private boolean isThinkingPreview() {
+        return "Ctrl+O".equals(previewShortcut) && "思考正文".equals(previewTitle);
+    }
+
     private AttributedString joinRows(List<AttributedString> rows) {
         AttributedStringBuilder prefix = new AttributedStringBuilder();
         for (int i = 0; i < rows.size(); i++) {
@@ -269,7 +291,11 @@ public final class ChatLineReader extends LineReaderImpl {
     }
 
     private void addPreview(List<AttributedString> lines) {
-        lines.add(new AttributedString(previewTitle + " · " + previewShortcut + " 收起", InlineTheme.TEXT));
+        String title = previewTitle + " · " + previewShortcut + " 收起";
+        if (wheelInHistory) {
+            title += " · Alt+↓ 继续浏览";
+        }
+        lines.add(new AttributedString(title, InlineTheme.TEXT));
         lines.addAll(preview);
     }
 
