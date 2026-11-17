@@ -2,6 +2,23 @@
 
 按日期倒序记录项目变更、验证结果和待处理问题。
 
+## 2026-11-17 — 提亮已提交的用户问题
+
+### 已完成
+
+- 已提交用户问题的 `>` 和正文改为亮白色，并移除原有深灰消息面板，避免行内主题再次将其显示为灰色。
+- 思考、工具和展开后的思考正文仍使用既有灰色体系。
+
+### 验证结果
+
+- `mvn test "-Dtest=AnsiStyleTest,InlineRendererTest" -DskipTests=false` 通过，20 项测试通过。
+- `mvn test -Pphase16-smoke` 通过，100 项冒烟测试通过。
+- 界面样式检测通过，`impeccable detect --json src/main/java/com/sidekick/util/AnsiStyle.java src/main/java/com/sidekick/render/inline/InlineRenderer.java` 无问题；`git diff --check` 通过。
+
+### 遗留与边界
+
+- 无 ANSI 色彩支持的终端仍使用默认前景色。
+
 ## 2026-11-17 — 思考和正文支持连续滚动
 
 ### 已完成

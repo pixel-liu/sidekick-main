@@ -15,6 +15,10 @@ class AnsiStyleTest {
         assertFalse(line.contains("\n"), line);
         assertTrue(stripAnsi(line).startsWith("> abc"), line);
         assertFalse(stripAnsi(line).startsWith(" "), line);
+        if (AnsiStyle.isEnabled()) {
+            assertTrue(line.startsWith("\u001B[97m> abc"), line);
+            assertFalse(line.contains("\u001B[48;5;236m"), line);
+        }
     }
 
     @Test

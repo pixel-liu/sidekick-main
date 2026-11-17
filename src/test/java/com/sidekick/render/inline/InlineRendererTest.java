@@ -120,6 +120,29 @@ class InlineRendererTest {
     }
 
     @Test
+    void submittedPromptUsesBrightWhiteTextWithoutGrayPanel() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+
+        InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8));
+        try {
+            renderer.printSubmittedPrompt("解释 pom.xml");
+
+            String emitted = sink.toString(StandardCharsets.UTF_8);
+            assertTrue(emitted.contains("> 解释 pom.xml"), emitted);
+            if (AnsiStyle.isEnabled()) {
+                assertTrue(emitted.contains("\u001B[97m> 解释 pom.xml"), emitted);
+            }
+            assertFalse(emitted.contains("\u001B[48;5;236m"), emitted);
+        } finally {
+            renderer.close();
+        }
+    }
+
+    @Test
     void streamedCodeBlockUsesCollapsedHeaderWithPrintAbove() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getType()).thenReturn("xterm-256color");

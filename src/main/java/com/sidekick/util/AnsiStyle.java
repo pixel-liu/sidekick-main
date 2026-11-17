@@ -20,8 +20,6 @@ public final class AnsiStyle {
     private static final String THINKING_GRAY = "\u001B[38;5;" + THINKING_GRAY_INDEX + "m";
     private static final String THINKING_CONTENT_GRAY = "\u001B[38;5;" + THINKING_CONTENT_GRAY_INDEX + "m";
     private static final String BRIGHT_WHITE = "\u001B[97m";
-    private static final String PURPLE = "\u001B[38;5;141m";
-    private static final String BG_PANEL = "\u001B[48;5;236m";
     private static final boolean ENABLED = determineEnabled();
 
     private AnsiStyle() {
@@ -83,7 +81,7 @@ public final class AnsiStyle {
         if (!ENABLED) {
             return line.stripTrailing();
         }
-        return BG_PANEL + PURPLE + prefix + RESET + BG_PANEL + safe + " ".repeat(padding) + RESET;
+        return BRIGHT_WHITE + line + RESET;
     }
 
     public static String codeLabel(String text) {
