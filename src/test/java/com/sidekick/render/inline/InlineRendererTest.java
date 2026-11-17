@@ -102,6 +102,24 @@ class InlineRendererTest {
     }
 
     @Test
+    void streamPreservesExplicitBrightWhiteForeground() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+
+        InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8));
+        try {
+            renderer.stream().println(AnsiStyle.brightWhite("MCP 启动提示"));
+
+            assertTrue(sink.toString(StandardCharsets.UTF_8).contains(AnsiStyle.brightWhite("MCP 启动提示")));
+        } finally {
+            renderer.close();
+        }
+    }
+
+    @Test
     void streamedCodeBlockUsesCollapsedHeaderWithPrintAbove() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getType()).thenReturn("xterm-256color");
@@ -268,6 +286,7 @@ class InlineRendererTest {
             assertTrue(emitted.contains("code: java"), emitted);
             assertTrue(emitted.contains("2 行"), "应统计 body 行数: " + emitted);
             assertTrue(emitted.contains("alt+o"), emitted);
+            assertTrue(emitted.contains(AnsiStyle.brightWhite("⏵ code: java (2 行, alt+o to expand)")), emitted);
             // body 行不应直接显示在 delegate 上（被吞掉了）—— 验证：last occurrence 不包含 "public class"
             // 但因为 delegate.print(line) 还是会先写 body？让我们再确认：检查 final state。
             // 注意：进入代码块后 body 走 codeBodyLines 缓冲，不写 delegate；end 触发 move-up + clear-to-eos

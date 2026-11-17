@@ -20,6 +20,7 @@ final class InlineTheme {
     // Preserve ANSI cursor controls used by the command palette.
     private static final Pattern CURSOR_CONTROL = Pattern.compile("\u001B\\[[0-?]*[ -/]*[@-ln-~]");
     private static final Pattern ALL_TEXT = Pattern.compile("(?s).+");
+    private static final String BRIGHT_WHITE_SGR = "\u001B[97m";
 
     private InlineTheme() {
     }
@@ -34,6 +35,10 @@ final class InlineTheme {
 
     static String format(String text) {
         if (!AnsiStyle.isEnabled() || text.isBlank()) {
+            return text;
+        }
+        // 启动阶段的高优先级提示会显式指定亮白色；不能再被通用的界面灰色覆盖。
+        if (text.contains(BRIGHT_WHITE_SGR)) {
             return text;
         }
         var controls = CURSOR_CONTROL.matcher(text);

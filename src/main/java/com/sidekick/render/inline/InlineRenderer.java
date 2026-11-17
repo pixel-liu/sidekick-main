@@ -461,7 +461,7 @@ public final class InlineRenderer implements Renderer {
                 inCodeBlock = false;
 
                 String label = codeLanguage.isEmpty() ? "code" : "code: " + codeLanguage;
-                String collapsedHeader = AnsiStyle.readableGray(
+                String collapsedHeader = AnsiStyle.brightWhite(
                         "⏵ " + label + " (" + bodyLineCount + " 行, alt+o to expand)");
 
                 List<String> expandedLines = new ArrayList<>();

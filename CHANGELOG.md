@@ -2,6 +2,23 @@
 
 按日期倒序记录项目变更、验证结果和待处理问题。
 
+## 2026-11-17 — 修正亮白 MCP 提示与折叠代码入口
+
+### 已完成
+
+- 行内渲染器保留显式指定的亮白前景色，MCP 启动进度、超时提示与状态查询指引不再被通用灰色主题覆盖。
+- 折叠代码入口改为亮白；展开后的思考正文仍沿用既有灰色样式。
+
+### 验证结果
+
+- `mvn test "-Dtest=InlineRendererTest,McpServerManagerTest" -DskipTests=false` 通过，25 项测试通过。
+- `mvn test -Pphase16-smoke` 通过，100 项冒烟测试通过。
+- 界面样式检测通过，`impeccable detect --json src/main/java/com/sidekick/render/inline/InlineTheme.java src/main/java/com/sidekick/render/inline/InlineRenderer.java` 无问题；`git diff --check` 通过。
+
+### 遗留与边界
+
+- 无 ANSI 色彩支持的终端仍使用默认前景色。
+
 ## 2026-11-17 — 展开思考时保留正文可见
 
 ### 已完成
