@@ -3,6 +3,7 @@ package com.sidekick.render;
 import com.sidekick.hitl.ApprovalRequest;
 import com.sidekick.hitl.ApprovalResult;
 import com.sidekick.llm.LlmClient;
+import com.sidekick.util.AnsiStyle;
 
 import java.io.PrintStream;
 import java.util.List;
@@ -139,6 +140,10 @@ public interface Renderer extends AutoCloseable {
      * PlainRenderer 直接 println 当前 Agent 内已有的标签格式。
      */
     void appendToolCalls(List<LlmClient.ToolCall> toolCalls);
+
+    default void appendToolResultSummary(String summary) {
+        stream().println(AnsiStyle.readableGray("  → " + summary));
+    }
 
     /**
      * 渲染一个文件 diff 块。

@@ -1,6 +1,7 @@
 package com.sidekick.render.inline;
 
 import java.io.PrintStream;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -38,7 +39,7 @@ public final class FoldableBlock {
                          String collapseFooter) {
         this.out = out;
         this.collapsedHeader = collapsedHeader;
-        this.expandedLines = List.copyOf(expandedLines);
+        this.expandedLines = new ArrayList<>(expandedLines);
         this.collapseFooter = collapseFooter;
     }
 
@@ -102,9 +103,17 @@ public final class FoldableBlock {
         return collapsedHeader;
     }
 
+    void appendDetail(String line) {
+        synchronized (out) {
+            expandedLines.add(line);
+        }
+    }
+
     /** 返回查看页使用的完整内容。 */
     List<String> expandedLines() {
-        return expandedLines;
+        synchronized (out) {
+            return List.copyOf(expandedLines);
+        }
     }
 
     /** 测试可见：返回当前占用行数。 */

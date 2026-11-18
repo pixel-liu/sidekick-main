@@ -46,6 +46,7 @@ public final class InlineRenderer implements Renderer {
     private boolean managedTurn;
     private boolean turnHasThinking;
     private boolean turnInEditor;
+    private volatile FoldableBlock toolCallBlock;
 
     // —— 代码块折叠状态机字段（仅供 createTranscriptStream 内部使用）——
     private final StringBuilder lineBuffer = new StringBuilder();
@@ -89,6 +90,7 @@ public final class InlineRenderer implements Renderer {
             assistantLineBuffer.setLength(0);
             inCodeBlock = false;
             assistantCodeBlock = null;
+            toolCallBlock = null;
             codeBodyLines.clear();
             codeLanguage = "";
             codeHeaderLine = null;
@@ -306,9 +308,19 @@ public final class InlineRenderer implements Renderer {
             return;
         }
         Map<String, List<LlmClient.ToolCall>> grouped = ToolCallRenderer.group(toolCalls);
-        blockRegistry.register(new FoldableBlock(out,
+        FoldableBlock block = new FoldableBlock(out,
                 ToolCallRenderer.collapsedHeader(grouped),
-                ToolCallRenderer.expandedLines(grouped)));
+                ToolCallRenderer.expandedLines(grouped));
+        blockRegistry.register(block);
+        toolCallBlock = block;
+    }
+
+    @Override
+    public void appendToolResultSummary(String summary) {
+        FoldableBlock block = toolCallBlock;
+        if (block != null) {
+            block.appendDetail("  → " + summary);
+        }
     }
 
     private void emitBlock(FoldableBlock block, boolean assistant) {

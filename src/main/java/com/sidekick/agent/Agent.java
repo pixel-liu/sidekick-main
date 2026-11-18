@@ -733,7 +733,7 @@ public class Agent {
             default -> "";
         };
         if (!summary.isBlank()) {
-            renderer().stream().println(AnsiStyle.readableGray("  → " + summary));
+            renderer().appendToolResultSummary(summary);
         }
     }
 

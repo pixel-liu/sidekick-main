@@ -50,7 +50,7 @@ final class InlineTurnDisplay {
     }
 
     static String thinkingLabel(String suffix) {
-        return AnsiStyle.brightWhite("Thinking") + InlineTheme.format(suffix);
+        return AnsiStyle.brightWhite("Thinking" + suffix);
     }
 
     void publishOverflow(PrintStream out, Size size, int room) {

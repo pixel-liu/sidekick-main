@@ -40,7 +40,6 @@ public final class ChatLineReader extends LineReaderImpl {
     private int previewStart;
     private int previewMaxStart;
     private boolean wheelTracking;
-    private boolean wheelInHistory;
 
     public ChatLineReader(Terminal terminal) {
         this(terminal, null);
@@ -108,40 +107,22 @@ public final class ChatLineReader extends LineReaderImpl {
         previewWidth = 0;
         previewStart = Integer.MAX_VALUE;
         previewMaxStart = 0;
-        wheelInHistory = false;
     }
 
     @Override
     public boolean mouse() {
         MouseEvent event = readMouseEvent();
         if (wheelTracking && event.getType() == MouseEvent.Type.Wheel) {
-            boolean up = event.getButton() == MouseEvent.Button.WheelUp;
-            if (up && previewStart == 0 && (isThinkingPreview() || preview.isEmpty())) {
-                setWheelInHistory(true);
-            } else {
-                scrollPreview(up ? -WHEEL_ROWS : WHEEL_ROWS);
-            }
+            scrollPreview(event.getButton() == MouseEvent.Button.WheelUp ? -WHEEL_ROWS : WHEEL_ROWS);
         }
         return true;
     }
 
     private boolean scrollPreview(int rows) {
-        if (hasScrollableContent() && previewMaxStart > 0) {
-            if (rows > 0 && wheelInHistory) {
-                setWheelInHistory(false);
-            }
+        if (previewMaxStart > 0) {
             previewStart = Math.max(0, Math.min(previewMaxStart, previewStart + rows));
         }
         return true;
-    }
-
-    private void setWheelInHistory(boolean enabled) {
-        wheelInHistory = enabled;
-        previewWidth = 0;
-    }
-
-    private boolean hasScrollableContent() {
-        return turnHasThinking || !preview.isEmpty();
     }
 
     private void setWheelTracking(boolean enabled) {
@@ -210,7 +191,7 @@ public final class ChatLineReader extends LineReaderImpl {
                             .toAttributedString();
                 }
             }
-            setWheelTracking(!wheelInHistory && hasScrollableContent() && previewMaxStart > 0);
+            setWheelTracking(previewMaxStart > 0);
             super.redisplay(flush);
         } finally {
             prompt = originalPrompt;
@@ -265,12 +246,10 @@ public final class ChatLineReader extends LineReaderImpl {
         boolean thinkingOpen = isThinkingPreview();
         List<AttributedString> ordered = new ArrayList<>();
         if (thinkingOpen) {
-            ordered.add(AttributedString.fromAnsi(InlineTurnDisplay.thinkingLabel(" . . . < · Ctrl+O 收起" + resumeHint())));
+            ordered.add(AttributedString.fromAnsi(InlineTurnDisplay.thinkingLabel(" . . . < · Ctrl+O 收起")));
             ordered.addAll(preview);
         } else if (turnLines != null && turnHasThinking) {
-            ordered.add(wheelInHistory
-                    ? AttributedString.fromAnsi(InlineTurnDisplay.thinkingLabel(" . . . >" + resumeHint()))
-                    : InlineTurnDisplay.THINKING);
+            ordered.add(InlineTurnDisplay.THINKING);
         }
         if (thinkingOpen && !turnAnswer.isEmpty()) {
             ordered.addAll(turnAnswer);
@@ -301,10 +280,6 @@ public final class ChatLineReader extends LineReaderImpl {
     private void addPreview(List<AttributedString> lines) {
         lines.add(new AttributedString(previewTitle + " · " + previewShortcut + " 收起", InlineTheme.TEXT));
         lines.addAll(preview);
-    }
-
-    private String resumeHint() {
-        return wheelInHistory ? " · Alt+↓ 继续浏览" : "";
     }
 
     @Override

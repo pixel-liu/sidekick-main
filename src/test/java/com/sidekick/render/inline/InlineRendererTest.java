@@ -367,10 +367,68 @@ class InlineRendererTest {
     }
 
     @Test
+    void toolResultSummariesAppearOnlyInToolDetails() throws Exception {
+        ByteArrayOutputStream screen = new ByteArrayOutputStream();
+        ByteArrayOutputStream transcript = new ByteArrayOutputStream();
+        try (Terminal terminal = viewTerminal("\u000F\u000F\u001Bo\n", screen);
+             InlineRenderer renderer = new InlineRenderer(terminal, sink(transcript))) {
+            ChatLineReader reader = bindPreview(renderer);
+            renderer.start();
+            renderer.beginTurn();
+            renderer.appendCollapsedThinking("REASONING");
+            renderer.appendToolCalls(List.of(tc("web_search", "{}"), tc("web_fetch", "{}")));
+            renderer.appendToolResultSummary("搜索失败：SEARCH_ERROR");
+            renderer.appendToolResultSummary("抓取完成：FETCH_SUCCESS");
+            renderer.assistantStream().println("FINAL_ANSWER");
+            renderer.beforeInput();
+            assertEquals("", reader.readChatLine("❯ "));
+            renderer.afterInput();
+            renderer.beginTurn();
+
+            String frames = screen.toString(StandardCharsets.UTF_8);
+            int details = frames.indexOf("Alt+O 收起");
+            assertTrue(details >= 0, frames);
+            assertTrue(frames.indexOf("SEARCH_ERROR") > details, frames);
+            assertTrue(frames.indexOf("FETCH_SUCCESS") > details, frames);
+            String committed = transcript.toString(StandardCharsets.UTF_8);
+            assertTrue(committed.contains("FINAL_ANSWER"), committed);
+            assertFalse(committed.contains("SEARCH_ERROR"), committed);
+            assertFalse(committed.contains("FETCH_SUCCESS"), committed);
+        }
+    }
+
+    @Test
+    void mouseWheelReturnsToEndOfCollapsedAnswerAfterOverscrollingTop() throws Exception {
+        ByteArrayOutputStream screen = new ByteArrayOutputStream();
+        String keys = "\u001b[<64;5;8M".repeat(25) + "\u001b[<65;5;8M".repeat(25) + "\n";
+        try (Terminal terminal = viewTerminal(keys, screen);
+             InlineRenderer renderer = new InlineRenderer(terminal, sink(new ByteArrayOutputStream()))) {
+            ChatLineReader reader = bindPreview(renderer);
+            renderer.start();
+            renderer.beginTurn();
+            renderer.appendCollapsedThinking("HIDDEN_REASONING");
+            renderer.assistantStream().println("TOP_OF_ANSWER");
+            renderer.assistantStream().print("ANSWER_BODY\n".repeat(50));
+            renderer.assistantStream().println("BOTTOM_OF_ANSWER");
+            renderer.beforeInput();
+            screen.reset();
+            assertEquals("", reader.readChatLine("❯ "));
+            renderer.afterInput();
+
+            String frames = screen.toString(StandardCharsets.UTF_8);
+            int firstEnd = frames.indexOf("BOTTOM_OF_ANSWER");
+            int start = frames.indexOf("TOP_OF_ANSWER");
+            assertTrue(firstEnd >= 0 && start > firstEnd, frames);
+            assertTrue(frames.lastIndexOf("BOTTOM_OF_ANSWER") > start, frames);
+            assertFalse(frames.contains("HIDDEN_REASONING"), frames);
+        }
+    }
+
+    @Test
     void multipleModelCallsShareOneThinkingBlockAndToggleInlineWithoutAppendingAnswer() throws Exception {
         ByteArrayOutputStream screen = new ByteArrayOutputStream();
         ByteArrayOutputStream transcript = new ByteArrayOutputStream();
-        String keys = "draft\u000F\u001b[<64;5;8M\u001b[1;3B"
+        String keys = "draft\u000F" + "\u001b[<64;5;8M".repeat(3)
                 + "\u001b[<65;5;8M".repeat(45) + "\u001b[<64;5;8M\u000F\n";
         try (Terminal terminal = viewTerminal(keys, screen);
              InlineRenderer renderer = new InlineRenderer(terminal, sink(transcript))) {
@@ -413,14 +471,16 @@ class InlineRendererTest {
             assertTrue(frames.indexOf("ANSWER_END", answerAt) > answerAt, frames);
             assertTrue(frames.contains("\u001b[?1000h"), frames);
             assertTrue(frames.contains("\u001b[?1000l"), frames);
-            assertEquals(2, frames.split("\u001b\\[\\?1000h", -1).length - 1, frames);
-            assertTrue(frames.contains("Alt+↓ 继续浏览"), frames);
+            assertEquals(1, frames.split("\u001b\\[\\?1000h", -1).length - 1, frames);
+            assertFalse(frames.contains("Alt+↓ 继续浏览"), frames);
             assertFalse(frames.matches("(?s).*\u001b\\[[0-9]*[LM].*"), frames);
             assertEquals(published, transcript.toString(StandardCharsets.UTF_8));
 
             renderer.beginTurn();
             String raw = transcript.toString(StandardCharsets.UTF_8);
-            assertTrue(raw.contains(AnsiStyle.brightWhite("Thinking")), raw);
+            assertTrue(raw.contains(AnsiStyle.brightWhite("Thinking . . . >")), raw);
+            assertEquals(AnsiStyle.brightWhite("Thinking . . . < · Ctrl+O 收起"),
+                    InlineTurnDisplay.thinkingLabel(" . . . < · Ctrl+O 收起"));
             String committed = AttributedString.fromAnsi(raw).toString();
             assertEquals(1, committed.split("Thinking \\. \\. \\. >", -1).length - 1, committed);
             assertTrue(committed.indexOf("Thinking . . . >") < committed.indexOf("ANSWER_START"), committed);
