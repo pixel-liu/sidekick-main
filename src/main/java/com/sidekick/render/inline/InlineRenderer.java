@@ -123,10 +123,13 @@ public final class InlineRenderer implements Renderer {
                         turnDisplay = new InlineTurnDisplay(terminal);
                     }
                     turnDisplay.unpaint();
-                    var size = TerminalCapabilities.safeSize(terminal);
-                    turnDisplay.publishOverflow(out, turnHasThinking, size, chat.foldedTranscriptRows(size));
+                    // An expandable turn must stay together until its heading and answer can be committed once.
+                    if (!turnHasThinking) {
+                        var size = TerminalCapabilities.safeSize(terminal);
+                        turnDisplay.publishOverflow(out, size, chat.foldedTranscriptRows(size));
+                    }
                 }
-                chat.setTurnLines(turnDisplay.lines(), turnDisplay.answerLines(), turnDisplay.hasThinkingHeader(turnHasThinking));
+                chat.setTurnLines(turnDisplay.lines(), turnDisplay.answerLines(), turnHasThinking);
                 turnInEditor = true;
             }
         }
@@ -238,7 +241,7 @@ public final class InlineRenderer implements Renderer {
                 if (manageTurn()) {
                     statusBar.writeAboveActivity(() -> currentTurnDisplay().paint(true));
                 } else {
-                    emitUi("Thinking . . . >" + System.lineSeparator());
+                    emit(InlineTurnDisplay.FOLDED_THINKING + System.lineSeparator());
                 }
             }
         }
@@ -560,7 +563,7 @@ public final class InlineRenderer implements Renderer {
                 turnDisplay.commit(out, includeThinking && turnHasThinking);
                 turnDisplay = null;
             } else if (managedTurn && includeThinking && turnHasThinking) {
-                out.println(InlineTheme.format(InlineTurnDisplay.THINKING.toString()));
+                out.println(InlineTurnDisplay.FOLDED_THINKING);
             }
         }
     }

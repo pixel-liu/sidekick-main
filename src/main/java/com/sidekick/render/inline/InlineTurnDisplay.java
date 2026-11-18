@@ -1,5 +1,6 @@
 package com.sidekick.render.inline;
 
+import com.sidekick.util.AnsiStyle;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
@@ -12,7 +13,8 @@ import java.util.List;
 
 /** Transcript still owned by the current turn. The caller serializes paints with the status dock. */
 final class InlineTurnDisplay {
-    static final AttributedString THINKING = new AttributedString("Thinking . . . >", InlineTheme.TEXT);
+    static final String FOLDED_THINKING = thinkingLabel(" . . . >");
+    static final AttributedString THINKING = AttributedString.fromAnsi(FOLDED_THINKING);
 
     private final Terminal terminal;
     private final Display display;
@@ -20,7 +22,6 @@ final class InlineTurnDisplay {
     private final List<AttributedString> answerLines = new ArrayList<>();
     private final List<String> transcript = new ArrayList<>();
     private int publishedLines;
-    private boolean publishedThinking;
     private boolean painted;
 
     InlineTurnDisplay(Terminal terminal) {
@@ -48,11 +49,11 @@ final class InlineTurnDisplay {
         return List.copyOf(answerLines);
     }
 
-    boolean hasThinkingHeader(boolean showThinking) {
-        return showThinking && !publishedThinking;
+    static String thinkingLabel(String suffix) {
+        return AnsiStyle.brightWhite("Thinking") + InlineTheme.format(suffix);
     }
 
-    void publishOverflow(PrintStream out, boolean showThinking, Size size, int room) {
+    void publishOverflow(PrintStream out, Size size, int room) {
         int width = Math.max(1, size.getColumns() - 1);
         int start = lines.size();
         while (start > publishedLines && room > 0) {
@@ -63,9 +64,8 @@ final class InlineTurnDisplay {
             room -= rows;
             start--;
         }
-        int headingRows = wrap(THINKING, width, terminal).size();
-        if (start > publishedLines || hasThinkingHeader(showThinking) && room < headingRows) {
-            publishThrough(out, start, showThinking);
+        if (start > publishedLines) {
+            publishThrough(out, start);
         }
     }
 
@@ -99,14 +99,13 @@ final class InlineTurnDisplay {
 
     void commit(PrintStream out, boolean includeThinking) {
         unpaint();
-        publishThrough(out, transcript.size(), includeThinking);
+        if (includeThinking) {
+            out.println(FOLDED_THINKING);
+        }
+        publishThrough(out, transcript.size());
     }
 
-    private void publishThrough(PrintStream out, int end, boolean includeThinking) {
-        if (hasThinkingHeader(includeThinking)) {
-            out.println(InlineTheme.format(THINKING.toString()));
-            publishedThinking = true;
-        }
+    private void publishThrough(PrintStream out, int end) {
         for (; publishedLines < end; publishedLines++) {
             out.println(transcript.get(publishedLines));
         }

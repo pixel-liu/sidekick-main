@@ -10,6 +10,7 @@ import org.jline.reader.Reference;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.impl.DumbTerminal;
+import org.jline.utils.AttributedString;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
@@ -396,10 +397,7 @@ class InlineRendererTest {
             screen.reset();
             renderer.beforeInput();
             String published = transcript.toString(StandardCharsets.UTF_8);
-            assertTrue(published.contains("Thinking . . . >"), published);
-            assertTrue(published.contains("ANSWER_START"), published);
-            assertFalse(published.contains("ANSWER_END"), published);
-            assertFalse(published.contains("第一次思考"), published);
+            assertEquals(original, published, "while Ctrl+O can expand, the current answer must stay out of scrollback");
             assertEquals("draft", reader.readChatLine("❯ "));
             renderer.afterInput();
 
@@ -410,7 +408,7 @@ class InlineRendererTest {
             assertTrue(frames.contains("补充思考"), frames);
             assertFalse(frames.contains("PgUp/PgDn"), frames);
             int answerAt = frames.indexOf("ANSWER_START");
-            assertTrue(frames.indexOf("思考正文") < frames.indexOf("第一次思考"), frames);
+            assertTrue(frames.indexOf("Ctrl+O 收起") >= 0 && frames.indexOf("Ctrl+O 收起") < frames.indexOf("第一次思考"), frames);
             assertTrue(frames.indexOf("补充思考") < answerAt, frames);
             assertTrue(frames.indexOf("ANSWER_END", answerAt) > answerAt, frames);
             assertTrue(frames.contains("\u001b[?1000h"), frames);
@@ -421,7 +419,9 @@ class InlineRendererTest {
             assertEquals(published, transcript.toString(StandardCharsets.UTF_8));
 
             renderer.beginTurn();
-            String committed = transcript.toString(StandardCharsets.UTF_8);
+            String raw = transcript.toString(StandardCharsets.UTF_8);
+            assertTrue(raw.contains(AnsiStyle.brightWhite("Thinking")), raw);
+            String committed = AttributedString.fromAnsi(raw).toString();
             assertEquals(1, committed.split("Thinking \\. \\. \\. >", -1).length - 1, committed);
             assertTrue(committed.indexOf("Thinking . . . >") < committed.indexOf("ANSWER_START"), committed);
             assertEquals(80, committed.split("FINAL_ANSWER", -1).length - 1, committed);
