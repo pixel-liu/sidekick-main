@@ -1038,10 +1038,10 @@ public class Agent {
             finishLateReasoning();
             pendingReasoning.setLength(0);
             reasoningStarted = false;
-            contentStarted = false;
-            if (streamedOutput) {
+            if (needsTranscriptSeparator()) {
                 out().println();
             }
+            contentStarted = false;
         }
 
         private void finish() {
@@ -1060,9 +1060,13 @@ public class Agent {
                 renderer.finishAssistantContent();
             }
             finishLateReasoning();
-            if (streamedOutput) {
+            if (needsTranscriptSeparator()) {
                 out().println();
             }
+        }
+
+        private boolean needsTranscriptSeparator() {
+            return hasThinkingPanel() ? contentStarted : streamedOutput;
         }
 
         private void finishLateReasoning() {

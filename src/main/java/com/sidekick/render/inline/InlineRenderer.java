@@ -14,7 +14,6 @@ import org.jline.utils.AttributedString;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -22,15 +21,13 @@ import java.util.Map;
  * Inline 流式渲染器：默认形态。
  *
  * <p>不进 alternate screen，主屏直接输出；输入期状态区紧跟当前 prompt 渲染。
- * 工具调用块、行内 diff、HITL 单字符提示、palette 等高级特性在 Day 3 / Day 4 落地，
- * 现阶段对应方法委托给 {@link PlainRenderer} 兜底。
+ * 回答正文按原顺序流式显示，工具调用和结果摘要留在独立的详情视图。
  */
 public final class InlineRenderer implements Renderer {
 
     private final Terminal terminal;
     private final PlainRenderer fallback;
     private final BottomStatusBar statusBar;
-    private final BlockRegistry blockRegistry;
     private final PrintStream stream;
     private final PrintStream assistantStream;
     private final PrintStream uiOutput;
@@ -48,15 +45,8 @@ public final class InlineRenderer implements Renderer {
     private boolean turnInEditor;
     private volatile FoldableBlock toolCallBlock;
 
-    // —— 代码块折叠状态机字段（仅供 createTranscriptStream 内部使用）——
     private final StringBuilder lineBuffer = new StringBuilder();
     private final StringBuilder assistantLineBuffer = new StringBuilder();
-    private final List<String> codeBodyLines = new ArrayList<>();
-    private boolean inCodeBlock;
-    private boolean codeIsAssistant;
-    private volatile FoldableBlock assistantCodeBlock;
-    private String codeLanguage = "";
-    private String codeHeaderLine;
 
     public InlineRenderer(Terminal terminal) {
         this(terminal, System.out);
@@ -73,7 +63,6 @@ public final class InlineRenderer implements Renderer {
         this.activityDisplay = statusBar == null
                 ? null
                 : new InlineActivityDisplay(terminal, statusBar);
-        this.blockRegistry = new BlockRegistry();
         this.stream = createTranscriptStream(lineBuffer, false);
         this.assistantStream = createTranscriptStream(assistantLineBuffer, true);
         this.uiOutput = InlineTheme.stream(out);
@@ -88,16 +77,10 @@ public final class InlineRenderer implements Renderer {
             turnInEditor = false;
             lineBuffer.setLength(0);
             assistantLineBuffer.setLength(0);
-            inCodeBlock = false;
-            assistantCodeBlock = null;
             toolCallBlock = null;
-            codeBodyLines.clear();
-            codeLanguage = "";
-            codeHeaderLine = null;
             synchronized (turnThinking) {
                 turnThinking.setLength(0);
             }
-            blockRegistry.clear();
         }
     }
 
@@ -308,11 +291,9 @@ public final class InlineRenderer implements Renderer {
             return;
         }
         Map<String, List<LlmClient.ToolCall>> grouped = ToolCallRenderer.group(toolCalls);
-        FoldableBlock block = new FoldableBlock(out,
+        toolCallBlock = new FoldableBlock(out,
                 ToolCallRenderer.collapsedHeader(grouped),
                 ToolCallRenderer.expandedLines(grouped));
-        blockRegistry.register(block);
-        toolCallBlock = block;
     }
 
     @Override
@@ -321,11 +302,6 @@ public final class InlineRenderer implements Renderer {
         if (block != null) {
             block.appendDetail("  → " + summary);
         }
-    }
-
-    private void emitBlock(FoldableBlock block, boolean assistant) {
-        blockRegistry.register(block);
-        emit(InlineTheme.format(block.collapsedHeader() + System.lineSeparator()), assistant);
     }
 
     @Override
@@ -371,29 +347,31 @@ public final class InlineRenderer implements Renderer {
         return terminal;
     }
 
-    /** Ctrl+O prefers the turn's reasoning. Alt+O always targets the latest tool or code block. */
-    public boolean toggleBlockPreview(boolean preferThinking) {
+    /** Ctrl+O shows reasoning; Alt+O shows the latest tool batch. */
+    public boolean toggleBlockPreview(boolean showThinking) {
         if (closed || !(lineReader instanceof ChatLineReader reader)) {
             return false;
         }
-        String thinking;
-        synchronized (turnThinking) {
-            thinking = preferThinking ? turnThinking.toString() : "";
-        }
-        if (!thinking.isEmpty()) {
+        if (showThinking) {
+            String thinking;
+            synchronized (turnThinking) {
+                thinking = turnThinking.toString();
+            }
+            if (thinking.isEmpty()) {
+                return false;
+            }
             List<AttributedString> lines = thinking.lines()
                     .map(line -> new AttributedString("│ " + cleanThinkingLine(line), InlineTheme.TEXT))
                     .toList();
             return reader.togglePreview("思考正文", "Ctrl+O", lines);
         }
-        FoldableBlock block = blockRegistry.peekLast();
+        FoldableBlock block = toolCallBlock;
         if (block == null) {
             return false;
         }
-        boolean assistantCode = block == assistantCodeBlock;
-        return reader.togglePreview("详情", preferThinking ? "Ctrl+O" : "Alt+O", block.expandedLines().stream()
+        return reader.togglePreview("工具详情", "Alt+O", block.expandedLines().stream()
                 .map(AttributedString::fromAnsi)
-                .map(line -> assistantCode ? line : InlineTheme.foreground(line)).toList());
+                .map(InlineTheme::foreground).toList());
     }
 
     private PrintStream createTranscriptStream(StringBuilder buffer, boolean assistant) {
@@ -413,7 +391,7 @@ public final class InlineRenderer implements Renderer {
                     if (closed) {
                         return;
                     }
-                    feedWithCodeBlockDetection(text, buffer, assistant);
+                    feedTranscript(text, buffer, assistant);
                 }
             }
 
@@ -424,12 +402,7 @@ public final class InlineRenderer implements Renderer {
         }, true, StandardCharsets.UTF_8);
     }
 
-    /**
-     * 行级状态机：检测 {@code ┌─ code:} / {@code └─ end} 边界，把整段代码块换成
-     * {@link FoldableBlock}。代码体在流式期间不写到终端（避免大段文本刷屏），
-     * 等 {@code └─ end} 到达后输出折叠头。
-     */
-    private void feedWithCodeBlockDetection(String text, StringBuilder buffer, boolean assistant) {
+    private void feedTranscript(String text, StringBuilder buffer, boolean assistant) {
         for (int i = 0; i < text.length(); i++) {
             char ch = text.charAt(i);
             buffer.append(ch);
@@ -445,53 +418,6 @@ public final class InlineRenderer implements Renderer {
         if (assistant) {
             // Keep the first answer line editable even if reasoning first arrives after it.
             manageTurn();
-        }
-        String stripped = stripAnsi(line).trim();
-
-        if (!inCodeBlock && stripped.startsWith("┌─ code")) {
-            // Hold the whole block until the closing marker arrives.
-            inCodeBlock = true;
-            codeIsAssistant = assistant;
-            int colon = stripped.indexOf(':');
-            codeLanguage = colon >= 0 ? stripped.substring(colon + 1).trim() : "";
-            codeHeaderLine = stripTrailingNewline(line);
-            codeBodyLines.clear();
-            return;
-        }
-
-        if (inCodeBlock && codeIsAssistant == assistant) {
-            if (stripped.startsWith("└─ end")) {
-                int bodyLineCount = codeBodyLines.size();
-                inCodeBlock = false;
-
-                String label = codeLanguage.isEmpty() ? "code" : "code: " + codeLanguage;
-                String collapsedHeader = AnsiStyle.brightWhite(
-                        "⏵ " + label + " (" + bodyLineCount + " 行, alt+o to expand)");
-
-                List<String> expandedLines = new ArrayList<>();
-                expandedLines.add(stripTrailingNewline(codeHeaderLine));
-                for (String body : codeBodyLines) {
-                    expandedLines.add(stripTrailingNewline(body));
-                }
-                expandedLines.add(stripTrailingNewline(line));
-
-                FoldableBlock block = new FoldableBlock(out, collapsedHeader, expandedLines);
-                if (assistant) {
-                    assistantCodeBlock = block;
-                }
-                emitBlock(block, assistant);
-
-                codeBodyLines.clear();
-                codeHeaderLine = null;
-                return;
-            }
-            // body 行：缓冲，不写终端、不入 transcript
-            codeBodyLines.add(line);
-            return;
-        }
-
-        // 非代码块：常规流式
-        if (assistant) {
             emit(line, true);
         } else {
             emitUi(line);
@@ -586,44 +512,6 @@ public final class InlineRenderer implements Renderer {
         }
         String block = String.join("\n", lines);
         return block.endsWith("\n") ? block : block + "\n";
-    }
-
-    private static String stripAnsi(String s) {
-        if (s == null || s.isEmpty()) {
-            return "";
-        }
-        StringBuilder sb = new StringBuilder(s.length());
-        for (int i = 0; i < s.length(); i++) {
-            char ch = s.charAt(i);
-            if (ch == '' && i + 1 < s.length() && s.charAt(i + 1) == '[') {
-                int j = i + 2;
-                while (j < s.length()) {
-                    char c = s.charAt(j);
-                    if (c >= '@' && c <= '~') {
-                        break;
-                    }
-                    j++;
-                }
-                i = j;
-                continue;
-            }
-            sb.append(ch);
-        }
-        return sb.toString();
-    }
-
-    private static String stripTrailingNewline(String s) {
-        if (s == null || s.isEmpty()) {
-            return s == null ? "" : s;
-        }
-        int end = s.length();
-        if (s.charAt(end - 1) == '\n') {
-            end--;
-        }
-        if (end > 0 && s.charAt(end - 1) == '\r') {
-            end--;
-        }
-        return s.substring(0, end);
     }
 
 }

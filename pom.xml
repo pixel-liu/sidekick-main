@@ -246,6 +246,7 @@
                         <configuration>
                             <argLine>-Dfile.encoding=UTF-8 -Djava.io.tmpdir=${project.build.directory} -DSidekick.log.dir=${project.build.directory}/test-logs -DSidekick.audit.dir=${project.build.directory}/test-audit</argLine>
                             <includes>
+                                <include>**/agent/AgentStreamRendererTest.java</include>
                                 <include>**/cli/MainInputNormalizationTest.java</include>
                                 <include>**/hitl/RendererHitlHandlerTest.java</include>
                                 <include>**/hitl/SwitchableHitlHandlerTest.java</include>

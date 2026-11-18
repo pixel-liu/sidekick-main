@@ -5,6 +5,7 @@ import com.sidekick.hitl.ApprovalResult;
 import com.sidekick.llm.LlmClient;
 import com.sidekick.render.StatusInfo;
 import com.sidekick.util.AnsiStyle;
+import com.sidekick.util.TerminalMarkdownRenderer;
 import org.jline.reader.LineReader;
 import org.jline.reader.Reference;
 import org.jline.terminal.Size;
@@ -144,7 +145,7 @@ class InlineRendererTest {
     }
 
     @Test
-    void streamedCodeBlockUsesCollapsedHeaderWithPrintAbove() {
+    void streamedCodeBlockStaysVisibleWithPrintAbove() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getType()).thenReturn("xterm-256color");
         Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
@@ -157,17 +158,13 @@ class InlineRendererTest {
         try {
             renderer.bindLineReader(lineReader);
             renderer.beginTurn();
-            renderer.stream().println("┌─ code: bash");
-            renderer.stream().println("    echo hi");
-            renderer.stream().println("└─ end");
+            var markdown = new TerminalMarkdownRenderer(renderer.assistantStream());
+            markdown.append("```bash\necho hi\n");
 
             ArgumentCaptor<String> output = ArgumentCaptor.forClass(String.class);
-            Mockito.verify(lineReader).printAbove(output.capture());
-            String rendered = output.getValue();
-            assertTrue(rendered.contains("⏵"), rendered);
-            assertTrue(rendered.contains("code: bash"), rendered);
-            assertTrue(rendered.contains("1 行"), rendered);
-            assertFalse(rendered.contains("echo hi"), rendered);
+            Mockito.verify(lineReader, Mockito.times(2)).printAbove(output.capture());
+            assertTrue(output.getAllValues().get(0).contains("code: bash"));
+            assertTrue(output.getAllValues().get(1).contains("    echo hi"));
             assertFalse(sink.toString(StandardCharsets.UTF_8).contains("echo hi"));
         } finally {
             renderer.close();
@@ -319,50 +316,30 @@ class InlineRendererTest {
     }
 
     @Test
-    void streamedCodeBlockCollapsesIntoFoldableHeader() {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
-        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        InlineRenderer renderer = new InlineRenderer(terminal,
-                new PrintStream(sink, true, StandardCharsets.UTF_8));
-        try {
-            renderer.beginTurn();
-            // 模拟 TerminalMarkdownRenderer 输出的代码块（手写预渲染好的 markup）
-            renderer.stream().println("┌─ code: java");
-            renderer.stream().println("    public class Main {");
-            renderer.stream().println("    }");
-            renderer.stream().println("└─ end");
-
-            String emitted = sink.toString(StandardCharsets.UTF_8);
-            assertTrue(emitted.contains("⏵"), "应该出现折叠箭头: " + emitted);
-            assertTrue(emitted.contains("code: java"), emitted);
-            assertTrue(emitted.contains("2 行"), "应统计 body 行数: " + emitted);
-            assertTrue(emitted.contains("alt+o"), emitted);
-            assertTrue(emitted.contains(AnsiStyle.brightWhite("⏵ code: java (2 行, alt+o to expand)")), emitted);
-            // body 行不应直接显示在 delegate 上（被吞掉了）—— 验证：last occurrence 不包含 "public class"
-            // 但因为 delegate.print(line) 还是会先写 body？让我们再确认：检查 final state。
-            // 注意：进入代码块后 body 走 codeBodyLines 缓冲，不写 delegate；end 触发 move-up + clear-to-eos
-            // 所以 emitted 里包含 ANSI 序列但**不**包含原 body 文本
-            assertFalse(emitted.contains("public class Main {"),
-                    "代码体应被折叠后不再可见: " + emitted);
-        } finally {
-            renderer.close();
-        }
-    }
-
-    @Test
-    void inlinePreviewShowsCodeBody() throws Exception {
+    void directoryTreeStaysInAnswerAndDoesNotOpenADetailView() throws Exception {
         ByteArrayOutputStream screen = new ByteArrayOutputStream();
-        try (Terminal terminal = viewTerminal("\u001Bo\n", screen);
-             InlineRenderer renderer = new InlineRenderer(terminal, sink(new ByteArrayOutputStream()))) {
+        ByteArrayOutputStream transcript = new ByteArrayOutputStream();
+        try (Terminal terminal = viewTerminal("\u000F\u001Bo\n", screen);
+             InlineRenderer renderer = new InlineRenderer(terminal, sink(transcript))) {
             ChatLineReader reader = bindPreview(renderer);
-            renderer.stream().println("┌─ code: bash");
-            renderer.stream().println("    echo hi");
-            renderer.stream().println("└─ end");
+            renderer.start();
+            renderer.beginTurn();
+            var markdown = new TerminalMarkdownRenderer(renderer.assistantStream());
+            markdown.append("项目目录结构\n\n```\nsidekick/\n├── pom.xml\n└── src/\n```\n\n构建说明\n");
+            markdown.finish();
 
+            renderer.beforeInput();
+            screen.reset();
             assertEquals("", reader.readChatLine("❯ "));
-            assertTrue(screen.toString(StandardCharsets.UTF_8).contains("echo hi"));
+            renderer.afterInput();
+            renderer.beginTurn();
+            String frames = screen.toString(StandardCharsets.UTF_8);
+            int root = frames.indexOf("    sidekick/");
+            assertTrue(root >= 0 && frames.indexOf("pom.xml", root) > root, frames);
+            assertFalse(frames.contains("工具详情"), frames);
+            var lines = AttributedString.fromAnsi(transcript.toString(StandardCharsets.UTF_8)).toString().lines().toList();
+            assertEquals(List.of("项目目录结构", "", "┌─ code", "    sidekick/", "    ├── pom.xml",
+                    "    └── src/", "└─ end", "", "构建说明"), lines);
         }
     }
 
@@ -379,19 +356,24 @@ class InlineRendererTest {
             renderer.appendToolCalls(List.of(tc("web_search", "{}"), tc("web_fetch", "{}")));
             renderer.appendToolResultSummary("搜索失败：SEARCH_ERROR");
             renderer.appendToolResultSummary("抓取完成：FETCH_SUCCESS");
-            renderer.assistantStream().println("FINAL_ANSWER");
+            var markdown = new TerminalMarkdownRenderer(renderer.assistantStream());
+            markdown.append("FINAL ANSWER\n```text\nDIRECTORY_TREE\n```\n");
+            markdown.finish();
             renderer.beforeInput();
+            screen.reset();
             assertEquals("", reader.readChatLine("❯ "));
             renderer.afterInput();
             renderer.beginTurn();
 
             String frames = screen.toString(StandardCharsets.UTF_8);
-            int details = frames.indexOf("Alt+O 收起");
+            int details = frames.indexOf("工具详情 · Alt+O 收起");
             assertTrue(details >= 0, frames);
+            assertTrue(frames.indexOf("DIRECTORY_TREE") >= 0 && frames.indexOf("DIRECTORY_TREE") < details, frames);
             assertTrue(frames.indexOf("SEARCH_ERROR") > details, frames);
             assertTrue(frames.indexOf("FETCH_SUCCESS") > details, frames);
             String committed = transcript.toString(StandardCharsets.UTF_8);
-            assertTrue(committed.contains("FINAL_ANSWER"), committed);
+            assertTrue(committed.contains("FINAL ANSWER"), committed);
+            assertTrue(committed.contains("DIRECTORY_TREE"), committed);
             assertFalse(committed.contains("SEARCH_ERROR"), committed);
             assertFalse(committed.contains("FETCH_SUCCESS"), committed);
         }

@@ -5,6 +5,7 @@ import com.sidekick.hitl.ApprovalRequest;
 import com.sidekick.hitl.ApprovalResult;
 import com.sidekick.render.Renderer;
 import com.sidekick.render.StatusInfo;
+import org.jline.utils.AttributedString;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
@@ -14,6 +15,7 @@ import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -60,6 +62,29 @@ class AgentStreamRendererTest {
                 "空白 reasoning 不应打印空的思考标题: " + rendered);
     }
 
+
+    @Test
+    void inlineToolIterationsDoNotAddBlankRowsBeforeTheFinalAnswer() throws Exception {
+        try (ThinkingRenderer thinkingRenderer = new ThinkingRenderer()) {
+            LlmClient.StreamListener renderer = newStreamRenderer(thinkingRenderer);
+            renderer.onContentDelta("我来查看目录。");
+            invokeNoArg(renderer, "resetBetweenIterations");
+            String afterPreamble = thinkingRenderer.transcript();
+
+            for (int iteration = 0; iteration < 8; iteration++) {
+                renderer.onReasoningDelta("检查下一个目录。");
+                invokeNoArg(renderer, "resetBetweenIterations");
+            }
+            String hiddenIterations = thinkingRenderer.transcript().substring(afterPreamble.length());
+            assertEquals(List.of("Thinking . . . >"), hiddenIterations.lines().toList());
+
+            renderer.onContentDelta("项目目录结构");
+            invokeNoArg(renderer, "finish");
+            List<String> rows = AttributedString.fromAnsi(thinkingRenderer.transcript()).toString().lines()
+                    .filter(row -> !row.equals("Thinking . . . >")).toList();
+            assertEquals(List.of("▪ 我来查看目录。", "", "▪ 项目目录结构", ""), rows);
+        }
+    }
 
     @Test
     void inlineThinkingPanelReceivesReasoningInsteadOfTranscriptHeading() throws Exception {
@@ -150,8 +175,10 @@ class AgentStreamRendererTest {
 
         @Override
         public void collapseThinking() {
-            collapsed = true;
-            stream.println("Thinking . . . >");
+            if (!collapsed && !thinking.isEmpty()) {
+                collapsed = true;
+                stream.println("Thinking . . . >");
+            }
         }
 
         @Override
