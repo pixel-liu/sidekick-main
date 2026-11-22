@@ -64,9 +64,14 @@ public class SideGitManager {
         if (!config.enabled()) {
             return null;
         }
+        InterruptibleFileTreeIterator.checkInterrupted();
         try (Git git = openGit()) {
-            git.add().addFilepattern(".").call();
-            git.add().setUpdate(true).addFilepattern(".").call();
+            git.add().setWorkingTreeIterator(new InterruptibleFileTreeIterator(git.getRepository()))
+                    .addFilepattern(".").call();
+            InterruptibleFileTreeIterator.checkInterrupted();
+            git.add().setWorkingTreeIterator(new InterruptibleFileTreeIterator(git.getRepository()))
+                    .setUpdate(true).addFilepattern(".").call();
+            InterruptibleFileTreeIterator.checkInterrupted();
             String message = phase.label() + " " + safeTurnId(turnId)
                     + (summary == null || summary.isBlank() ? "" : "\n\n" + summary.trim());
             RevCommit commit = git.commit()

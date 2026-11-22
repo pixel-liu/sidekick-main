@@ -248,6 +248,8 @@
                             <includes>
                                 <include>**/agent/AgentStreamRendererTest.java</include>
                                 <include>**/cli/MainInputNormalizationTest.java</include>
+                                <include>**/cli/MainTaskCancellationTest.java</include>
+                                <include>**/snapshot/*Test.java</include>
                                 <include>**/hitl/RendererHitlHandlerTest.java</include>
                                 <include>**/hitl/SwitchableHitlHandlerTest.java</include>
                                 <include>**/render/*Test.java</include>

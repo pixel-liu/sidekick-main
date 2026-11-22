@@ -1,9 +1,14 @@
 package com.sidekick.snapshot;
 
+import com.sidekick.runtime.CancellationContext;
+import com.sidekick.runtime.CancellationToken;
+
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -27,9 +32,11 @@ public class SnapshotService implements AutoCloseable {
     }
 
     public <T> T runTurn(String mode, String input, ThrowingSupplier<T> supplier) throws Exception {
+        checkCancellation();
         String turnId = turnId(mode);
         String summary = summarize(mode, input);
         snapshotBeforeTurn(turnId, summary);
+        checkCancellation();
         try {
             return supplier.get();
         } finally {
@@ -38,13 +45,30 @@ public class SnapshotService implements AutoCloseable {
     }
 
     public void snapshotBeforeTurn(String turnId, String summary) {
+        checkCancellation();
         if (!manager.config().enabled()) {
             return;
         }
-        try {
-            manager.preTurnSnapshot(turnId, summary);
-        } catch (Exception e) {
-            System.err.println("⚠️ pre-turn 快照失败: " + e.getMessage());
+        // Keep slow Git work off the agent thread so cancellation can resume input immediately.
+        // The same queue serializes pre/post snapshots; a canceled pre-turn never starts the agent.
+        Future<?> snapshot = executor.submit(() -> manager.preTurnSnapshot(turnId, summary));
+        CancellationToken token = CancellationContext.currentRun();
+        try (CancellationToken.Registration registration = token == null ? null
+                : token.onCancel(() -> snapshot.cancel(true))) {
+            snapshot.get();
+        } catch (InterruptedException e) {
+            snapshot.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new CancellationException("任务前快照已取消");
+        } catch (ExecutionException e) {
+            checkCancellation();
+            System.err.println("⚠️ pre-turn 快照失败: " + e.getCause().getMessage());
+        }
+    }
+
+    private static void checkCancellation() {
+        if (CancellationContext.isCancelled()) {
+            throw new CancellationException("当前任务已取消");
         }
     }
 

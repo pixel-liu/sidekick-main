@@ -1,20 +1,41 @@
 package com.sidekick.snapshot;
 
+import com.sidekick.runtime.CancellationContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class SideGitManagerTest {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void canceledTurnNeverStartsSnapshotOrAgent() throws Exception {
+        var token = CancellationContext.startRun();
+        AtomicBoolean started = new AtomicBoolean();
+        try (SnapshotService service = SnapshotService.forProject(tempDir)) {
+            token.cancel();
+            assertThrows(CancellationException.class, () -> service.runTurn("react", "cancel", () -> {
+                started.set(true);
+                return "unexpected";
+            }));
+            assertFalse(started.get());
+            assertFalse(Files.exists(service.manager().gitDir()));
+        } finally {
+            CancellationContext.clear(token);
+        }
+    }
 
     @Test
     void restoresTrackedFilesToPreTurnSnapshot() throws Exception {

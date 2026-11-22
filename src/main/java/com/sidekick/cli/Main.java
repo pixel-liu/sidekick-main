@@ -391,7 +391,7 @@ public class Main {
         }
     }
 
-    private static final class CtrlCExit {
+    static final class CtrlCExit {
         private static final long EXIT_WINDOW_NANOS = TimeUnit.SECONDS.toNanos(2);
         private static final String EXIT_HINT = "2 秒内再按一次 Ctrl+C 退出 SideKick。";
         private final AtomicInteger pending = new AtomicInteger();
@@ -1219,7 +1219,7 @@ public class Main {
         return new AgentOrchestrator(llmClient, reactAgent.getToolRegistry(), reactAgent.getMemoryManager(), out);
     }
 
-    private static String runWithCancelSupport(Terminal terminal, PrintStream out, CtrlCExit ctrlC,
+    static String runWithCancelSupport(Terminal terminal, PrintStream out, CtrlCExit ctrlC,
                                                Callable<String> task) {
         ctrlC.taskCanceled = false;
         CancellationToken token = CancellationContext.startRun();
