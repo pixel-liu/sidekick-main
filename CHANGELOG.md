@@ -2,6 +2,27 @@
 
 按日期倒序记录项目变更、验证结果和待处理问题。
 
+## 2026-11-22 — 隔离 SideKick 模型凭据与项目 .env
+
+### 已完成
+
+- Provider 的默认读取范围改为用户级：`~/.sidekick/config.json`、进程环境变量、`~/.sidekick/credentials.env`，以及兼容既有安装的 `~/.env`。项目 `.env` 中的模型 Key 默认不再影响 SideKick。
+- 新增用户可维护的专用凭据文件 `~/.sidekick/credentials.env`，并保留 `/config provider ...` 的用户级配置入口；空值与重复 Key 继续安全跳过。
+- 新增 `/config project-env on|off`、补全和配置面板状态。显式开启后，项目 `.env` 仅作为所有用户级来源均未配置时的最后回退，重启后生效；也支持一次性环境变量 `SIDEKICK_ALLOW_PROJECT_ENV_CREDENTIALS=true`。
+- 同步 README、`.env.example` 与维护规则，明确业务项目 `.env` 不会再意外覆盖 SideKick 的模型配置。
+
+### 验证结果
+
+- `mvn test "-Dtest=SidekickConfigTest,SidekickCompleterTest,MainInputNormalizationTest" -DskipTests=false` 通过，48 项测试全部成功。
+- `mvn test -Pphase16-smoke` 通过，139 项测试全部成功。
+- `mvn package` 成功，已生成新版 JAR、ZIP 与 tar.gz 发行包。
+- 已覆盖默认隔离、专用凭据优先、用户目录优先于显式开启的项目配置、显式项目回退和命令补全。
+
+### 遗留与边界
+
+- 本次只隔离模型 Provider 配置；项目 `.env` 中供日志、MCP 等非 Provider 设置使用的配置仍遵循各自原有加载规则。
+- 现有运行中的 SideKick 进程不会热切换模型客户端；修改 `/config project-env` 后需要重启。
+
 ## 2026-11-22 — 修复空项目 Key 阻断用户目录配置
 
 ### 已完成

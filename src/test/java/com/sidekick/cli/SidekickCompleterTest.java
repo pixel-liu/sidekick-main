@@ -71,6 +71,17 @@ class SidekickCompleterTest {
     }
 
     @Test
+    void completesProjectEnvConfiguration() {
+        SidekickCompleter completer = new SidekickCompleter(List::of);
+        List<Candidate> candidates = new ArrayList<>();
+
+        completer.complete(null, parsed("/config project-env ", ""), candidates);
+
+        assertTrue(candidates.stream().anyMatch(c -> c.value().equals("on")));
+        assertTrue(candidates.stream().anyMatch(c -> c.value().equals("off")));
+    }
+
+    @Test
     void completesAgnesProviderCommand() {
         SidekickCompleter completer = new SidekickCompleter(List::of);
         List<Candidate> candidates = new ArrayList<>();

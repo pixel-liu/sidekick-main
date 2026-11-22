@@ -10,7 +10,9 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -18,10 +20,13 @@ public class SidekickConfig {
 
     private static final Path CONFIG_DIR = Path.of(System.getProperty("user.home"), ".sidekick");
     private static final Path CONFIG_FILE = CONFIG_DIR.resolve("config.json");
+    private static final Path CREDENTIALS_FILE = CONFIG_DIR.resolve("credentials.env");
     private static final ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
 
     private String defaultProvider = "glm";
     private Map<String, ProviderConfig> providers = new LinkedHashMap<>();
+    /** Project .env files often hold application secrets. Keep them opt-in for SideKick providers. */
+    private boolean allowProjectEnvCredentials;
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ProviderConfig {
@@ -58,6 +63,10 @@ public class SidekickConfig {
     public void setDefaultProvider(String defaultProvider) { this.defaultProvider = defaultProvider; }
     public Map<String, ProviderConfig> getProviders() { return providers; }
     public void setProviders(Map<String, ProviderConfig> providers) { this.providers = providers; }
+    public boolean isAllowProjectEnvCredentials() { return allowProjectEnvCredentials; }
+    public void setAllowProjectEnvCredentials(boolean allowProjectEnvCredentials) {
+        this.allowProjectEnvCredentials = allowProjectEnvCredentials;
+    }
 
     public String getApiKey(String provider) {
         ProviderConfig providerConfig = providers.get(provider);
@@ -111,7 +120,7 @@ public class SidekickConfig {
         }
     }
 
-    private static String loadModelFromEnv(String provider) {
+    private String loadModelFromEnv(String provider) {
         String envKey = switch (provider.toLowerCase()) {
             case "glm" -> "GLM_MODEL";
             case "deepseek" -> "DEEPSEEK_MODEL";
@@ -126,7 +135,7 @@ public class SidekickConfig {
             return envValue.trim();
         }
 
-        String dotEnvValue = readFromDotEnv(envKey);
+        String dotEnvValue = readProviderSettingFromDotEnv(envKey);
         if (dotEnvValue != null && !dotEnvValue.isBlank()) {
             return dotEnvValue.trim();
         }
@@ -136,7 +145,7 @@ public class SidekickConfig {
             if (moonshotValue != null && !moonshotValue.isBlank()) {
                 return moonshotValue.trim();
             }
-            String moonshotDotEnvValue = readFromDotEnv("MOONSHOT_MODEL");
+            String moonshotDotEnvValue = readProviderSettingFromDotEnv("MOONSHOT_MODEL");
             if (moonshotDotEnvValue != null && !moonshotDotEnvValue.isBlank()) {
                 return moonshotDotEnvValue.trim();
             }
@@ -147,7 +156,7 @@ public class SidekickConfig {
             if (xfyunValue != null && !xfyunValue.isBlank()) {
                 return xfyunValue.trim();
             }
-            String xfyunDotEnvValue = readFromDotEnv("XFYUN_MODEL");
+            String xfyunDotEnvValue = readProviderSettingFromDotEnv("XFYUN_MODEL");
             if (xfyunDotEnvValue != null && !xfyunDotEnvValue.isBlank()) {
                 return xfyunDotEnvValue.trim();
             }
@@ -156,7 +165,7 @@ public class SidekickConfig {
         return null;
     }
 
-    private static String loadApiKeyFromEnv(String provider) {
+    private String loadApiKeyFromEnv(String provider) {
         String envKey = switch (provider.toLowerCase()) {
             case "glm" -> "GLM_API_KEY";
             case "deepseek" -> "DEEPSEEK_API_KEY";
@@ -172,7 +181,7 @@ public class SidekickConfig {
             return envValue.trim();
         }
 
-        String dotEnvValue = readFromDotEnv(envKey);
+        String dotEnvValue = readProviderSettingFromDotEnv(envKey);
         if (dotEnvValue != null && !dotEnvValue.isBlank()) {
             return dotEnvValue.trim();
         }
@@ -182,7 +191,7 @@ public class SidekickConfig {
             if (moonshotValue != null && !moonshotValue.isBlank()) {
                 return moonshotValue.trim();
             }
-            String moonshotDotEnvValue = readFromDotEnv("MOONSHOT_API_KEY");
+            String moonshotDotEnvValue = readProviderSettingFromDotEnv("MOONSHOT_API_KEY");
             if (moonshotDotEnvValue != null && !moonshotDotEnvValue.isBlank()) {
                 return moonshotDotEnvValue.trim();
             }
@@ -193,7 +202,7 @@ public class SidekickConfig {
             if (xfyunValue != null && !xfyunValue.isBlank()) {
                 return xfyunValue.trim();
             }
-            String xfyunDotEnvValue = readFromDotEnv("XFYUN_API_KEY");
+            String xfyunDotEnvValue = readProviderSettingFromDotEnv("XFYUN_API_KEY");
             if (xfyunDotEnvValue != null && !xfyunDotEnvValue.isBlank()) {
                 return xfyunDotEnvValue.trim();
             }
@@ -202,7 +211,7 @@ public class SidekickConfig {
         return null;
     }
 
-    private static String loadBaseUrlFromEnv(String provider) {
+    private String loadBaseUrlFromEnv(String provider) {
         String envKey = switch (provider.toLowerCase()) {
             case "step" -> "STEP_BASE_URL";
             case "kimi" -> "KIMI_BASE_URL";
@@ -216,7 +225,7 @@ public class SidekickConfig {
             return envValue.trim();
         }
 
-        String dotEnvValue = readFromDotEnv(envKey);
+        String dotEnvValue = readProviderSettingFromDotEnv(envKey);
         if (dotEnvValue != null && !dotEnvValue.isBlank()) {
             return dotEnvValue.trim();
         }
@@ -226,7 +235,7 @@ public class SidekickConfig {
             if (moonshotValue != null && !moonshotValue.isBlank()) {
                 return moonshotValue.trim();
             }
-            String moonshotDotEnvValue = readFromDotEnv("MOONSHOT_BASE_URL");
+            String moonshotDotEnvValue = readProviderSettingFromDotEnv("MOONSHOT_BASE_URL");
             if (moonshotDotEnvValue != null && !moonshotDotEnvValue.isBlank()) {
                 return moonshotDotEnvValue.trim();
             }
@@ -237,7 +246,7 @@ public class SidekickConfig {
             if (xfyunValue != null && !xfyunValue.isBlank()) {
                 return xfyunValue.trim();
             }
-            String xfyunDotEnvValue = readFromDotEnv("XFYUN_BASE_URL");
+            String xfyunDotEnvValue = readProviderSettingFromDotEnv("XFYUN_BASE_URL");
             if (xfyunDotEnvValue != null && !xfyunDotEnvValue.isBlank()) {
                 return xfyunDotEnvValue.trim();
             }
@@ -246,7 +255,7 @@ public class SidekickConfig {
         return null;
     }
 
-    private static String loadLoraIdFromEnv(String provider) {
+    private String loadLoraIdFromEnv(String provider) {
         if (!"xfyun".equalsIgnoreCase(provider)) {
             return null;
         }
@@ -256,7 +265,7 @@ public class SidekickConfig {
             return envValue.trim();
         }
 
-        String dotEnvValue = readFromDotEnv("XFYUN_MAAS_LORA_ID");
+        String dotEnvValue = readProviderSettingFromDotEnv("XFYUN_MAAS_LORA_ID");
         if (dotEnvValue != null && !dotEnvValue.isBlank()) {
             return dotEnvValue.trim();
         }
@@ -266,15 +275,40 @@ public class SidekickConfig {
             return xfyunValue.trim();
         }
 
-        String xfyunDotEnvValue = readFromDotEnv("XFYUN_LORA_ID");
+        String xfyunDotEnvValue = readProviderSettingFromDotEnv("XFYUN_LORA_ID");
         if (xfyunDotEnvValue != null && !xfyunDotEnvValue.isBlank()) {
             return xfyunDotEnvValue.trim();
         }
         return null;
     }
 
-    private static String readFromDotEnv(String key) {
-        return readFromDotEnv(key, new File(".env"), new File(System.getProperty("user.home"), ".env"));
+    private String readProviderSettingFromDotEnv(String key) {
+        return readProviderSettingFromDotEnv(key,
+                allowProjectEnvCredentials || projectEnvCredentialsEnabledByEnvironment(),
+                CREDENTIALS_FILE.toFile(),
+                new File(System.getProperty("user.home"), ".env"),
+                new File(".env"));
+    }
+
+    static String readProviderSettingFromDotEnv(String key, boolean allowProjectEnv,
+                                                File credentialsFile, File legacyHomeEnv, File projectEnv) {
+        List<File> files = new ArrayList<>();
+        files.add(credentialsFile);
+        // Keep the documented user-home .env source for existing installations.
+        files.add(legacyHomeEnv);
+        if (allowProjectEnv) {
+            files.add(projectEnv);
+        }
+        return readFromDotEnv(key, files.toArray(File[]::new));
+    }
+
+    private static boolean projectEnvCredentialsEnabledByEnvironment() {
+        String value = System.getProperty("Sidekick.allow.project.env.credentials");
+        if (value == null || value.isBlank()) {
+            value = System.getenv("SIDEKICK_ALLOW_PROJECT_ENV_CREDENTIALS");
+        }
+        return value != null && ("true".equalsIgnoreCase(value.trim())
+                || "1".equals(value.trim()) || "yes".equalsIgnoreCase(value.trim()));
     }
 
     static String readFromDotEnv(String key, File... envFiles) {

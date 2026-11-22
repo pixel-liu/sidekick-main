@@ -468,7 +468,7 @@ public class Main {
         LlmClient llmClient = LlmClientFactory.createFromConfig(config);
         if (llmClient == null) {
             System.err.println("❌ 错误: 未找到可用的 API Key");
-            System.err.println("请在 .env 文件中添加 GLM_API_KEY、DEEPSEEK_API_KEY、STEP_API_KEY、KIMI_API_KEY、FREELLMAPI_API_KEY、XFYUN_MAAS_API_KEY 或 AGNES_API_KEY");
+            System.err.println("请配置环境变量、~/.sidekick/credentials.env、~/.env，或使用 /config provider 写入用户级模型 Key；项目 .env 需先显式开启。");
             System.exit(1);
         }
         AtomicReference<LlmClient> llmClientRef = new AtomicReference<>(llmClient);
@@ -1586,6 +1586,7 @@ public class Main {
                 new SlashCommandHint("/config provider freellmapi ", "/config provider freellmapi <选项>", "配置本地 FreeLLMAPI provider"),
                 new SlashCommandHint("/config provider xfyun ", "/config provider xfyun <选项>", "配置讯飞星辰 MaaS provider"),
                 new SlashCommandHint("/config provider agnes ", "/config provider agnes <选项>", "配置 Agnes provider"),
+                new SlashCommandHint("/config project-env ", "/config project-env on|off", "切换项目 .env 的 Provider 配置读取"),
                 new SlashCommandHint("/plan", "/plan", "下一条任务使用 Plan-and-Execute 模式"),
                 new SlashCommandHint("/plan ", "/plan <任务内容>", "直接用计划模式执行这条任务"),
                 new SlashCommandHint("/team", "/team", "下一条任务使用 Multi-Agent 协作模式"),
@@ -1761,6 +1762,8 @@ public class Main {
                 "HITL: " + (hitlHandler.isEnabled() ? "ON" : "OFF"),
                 "Skill 启用数: " + (skillRegistry == null ? 0 : skillRegistry.enabledSkills().size()),
                 "渲染器: " + renderer.getClass().getSimpleName(),
+                "项目 .env Provider 配置: " + (config != null && config.isAllowProjectEnvCredentials() ? "ON" : "OFF"),
+                "凭据: ~/.sidekick/credentials.env / ~/.env / 环境变量",
                 "配置文件: ~/.sidekick/config.json (只读视图，编辑请用编辑器)"
         );
         int selected = renderer.openPalette("配置 / config", items);
@@ -1773,13 +1776,30 @@ public class Main {
             case 2 -> "💡 切换 HITL: /hitl on / /hitl off";
             case 3 -> "💡 管理 Skill: /skill list / /skill on <name> / /skill off <name>";
             case 4 -> "💡 切换渲染器（重启后生效）: Sidekick_RENDERER=inline|lanterna|plain";
-            case 5 -> "💡 当前不在 TUI 内编辑 config.json，建议在编辑器里改完重启";
+            case 5 -> "💡 项目 .env 默认不参与 Provider 配置；按需运行 /config project-env on 或 off";
+            case 6 -> "💡 优先使用 ~/.sidekick/credentials.env；旧版 ~/.env 作为兼容回退";
+            case 7 -> "💡 当前不在 TUI 内编辑 config.json，建议在编辑器里改完重启";
             default -> "(unknown)";
         };
         renderer.stream().println(hint);
     }
 
     static String handleConfigCommand(SidekickConfig config, String payload) {
+        String projectEnvUpdate = payload == null ? "" : payload.trim();
+        if (projectEnvUpdate.equalsIgnoreCase("project-env")
+                || projectEnvUpdate.regionMatches(true, 0, "project-env ", 0, "project-env ".length())) {
+            String value = projectEnvUpdate.substring("project-env".length()).trim();
+            if ("on".equalsIgnoreCase(value)) {
+                config.setAllowProjectEnvCredentials(true);
+            } else if ("off".equalsIgnoreCase(value)) {
+                config.setAllowProjectEnvCredentials(false);
+            } else {
+                return "❌ 用法: /config project-env on|off";
+            }
+            config.save();
+            return "✅ 项目 .env Provider 配置已" + (config.isAllowProjectEnvCredentials() ? "开启" : "关闭")
+                    + "；重启 SideKick 后生效。";
+        }
         ProviderConfigUpdate update = parseProviderConfigUpdate(payload);
         if (update.error() != null) {
             return "❌ " + update.error() + "\n" + providerConfigUsage();
@@ -1887,6 +1907,7 @@ public class Main {
                   /config provider xfyun --base-url https://maas-api.cn-huabei-1.xf-yun.com/v2 --api-key <key> --model Qwen3.6-35B-A3B --default
                   /config provider xfyun --lora-id <resourceId>
                   /config provider agnes --api-key <key> --model agnes-2.0-flash --default
+                  /config project-env on|off
                   /model freellmapi
                   /model xfyun
                   /model agnes
@@ -2848,13 +2869,6 @@ public class Main {
             case CANCEL -> PlanExecuteAgent.PlanReviewDecision.cancel();
             case SUPPLEMENT -> PlanExecuteAgent.PlanReviewDecision.supplement(decision.feedback());
         };
-    }
-
-    /**
-     * 从 .env 文件加载 API Key
-     */
-    private static String loadApiKey() {
-        return loadConfigValue("GLM_API_KEY", null);
     }
 
     private static void configureLogging() {

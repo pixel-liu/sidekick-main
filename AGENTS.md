@@ -17,7 +17,7 @@ Read SideKick.md for the shared architecture and development commands.
 - Validate interactive input and the status layout with `mvn test -Pphase16-smoke`.
 - Ctrl+C / Esc 必须能取消任务前快照等待并恢复聊天输入，不能等待目录扫描或大文件压缩结束；已取消的快照准备不得继续启动 Agent。前后快照保持串行，Git 遍历和文件读取需响应线程中断。
 - `/snapshot clean` 只删除当前项目对应的 Side-Git 快照。Windows 下必须清除 JGit 对象文件的只读属性后再递归删除；不得影响项目工作目录或其他项目快照。
-- `.env` 按当前项目、用户目录的顺序读取。重复 Key 必须跳过空值，项目中的第一个非空值优先于用户目录配置；修改加载逻辑时覆盖重复空值与用户目录回退。
+- Provider 凭据默认只从用户级 `~/.sidekick/config.json`、进程环境变量、`~/.sidekick/credentials.env` 和兼容用的 `~/.env` 读取；当前项目 `.env` 默认不参与，以免项目密钥误覆盖 SideKick。仅当 `/config project-env on` 持久开启，或设置 `SIDEKICK_ALLOW_PROJECT_ENV_CREDENTIALS=true` 时，才将项目 `.env` 作为最后回退。重复 Key 必须跳过空值；修改加载逻辑时覆盖默认隔离、显式开启、专用凭据优先和用户目录回退。
 
 ## Built-in skills
 

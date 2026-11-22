@@ -108,7 +108,15 @@ final class SidekickCompleter implements Completer {
         String[] parts = payload.trim().isEmpty() ? new String[0] : payload.trim().split("\\s+");
         if (parts.length <= 1 && !payload.endsWith(" ")) {
             addMatching(candidates, "配置", payload,
-                    option("provider ", "配置 provider", "/config provider <name>"));
+                    option("provider ", "配置 provider", "/config provider <name>"),
+                    option("project-env ", "允许项目 .env 提供模型配置", "/config project-env on|off"));
+            return true;
+        }
+        if (parts.length >= 1 && "project-env".equalsIgnoreCase(parts[0])) {
+            String prefix = payload.endsWith(" ") ? "" : parts[parts.length - 1];
+            addMatching(candidates, "项目 .env", prefix,
+                    option("on", "允许项目 .env 提供 Provider 配置"),
+                    option("off", "只使用用户级凭据和环境变量"));
             return true;
         }
         if (parts.length >= 1 && "provider".equalsIgnoreCase(parts[0])) {

@@ -38,25 +38,19 @@ irm https://raw.githubusercontent.com/pixel-liu/sidekick-main/main/scripts/insta
 curl -fsSL https://raw.githubusercontent.com/pixel-liu/sidekick-main/main/scripts/install.sh | bash
 ```
 
-安装器只安装程序并配置命令路径，不会写入或分发 API Key。每位用户仍需通过自己的环境变量、项目 `.env` 或用户主目录 `.env` 配置模型密钥。
+安装器只安装程序并配置命令路径，不会写入或分发 API Key。模型凭据默认只从当前用户范围读取，不会自动读取项目 `.env`。
 
-从源码构建还需要 Maven：
+从源码构建还需要 Maven。模型凭据推荐写入用户级文件 `%USERPROFILE%\.sidekick\credentials.env`（macOS/Linux 为 `~/.sidekick/credentials.env`）：
 
 ```bash
-# macOS / Linux
-cp .env.example .env
-
-# Windows PowerShell
-Copy-Item .env.example .env
+# 示例：~/.sidekick/credentials.env
+DEEPSEEK_API_KEY=your_api_key_here
+DEEPSEEK_MODEL=deepseek-v4-flash
 ```
 
-在 `.env` 中至少填写一个 API Key，例如：
+也可以使用操作系统环境变量，或通过 `/config provider <name> --api-key <key>` 保存到用户级 `~/.sidekick/config.json`。为兼容既有安装，`~/.env` 仍是回退来源。Provider 设置优先级为：`config.json` 中的 provider 配置、进程环境变量、`~/.sidekick/credentials.env`、`~/.env`。
 
-```dotenv
-GLM_API_KEY=your_api_key_here
-```
-
-SideKick 先读取当前项目 `.env`，再回退到用户目录的 `~/.env`。同一个 Key 出现多次时会忽略空值并使用第一个非空值；项目中的有效值优先于用户目录配置。
+项目 `.env` 中的模型 Key 默认完全忽略，因此业务项目的空 Key、测试 Key 或重复 Key 不会影响 SideKick。确有每项目独立模型配置的需要时，在 SideKick 内执行一次 `/config project-env on`，重启后才会把当前项目 `.env` 作为上述用户级来源均未设置时的最后回退；用 `/config project-env off` 关闭。也可仅对一次启动设置 `SIDEKICK_ALLOW_PROJECT_ENV_CREDENTIALS=true`。所有 `.env` 来源均会跳过空值并继续查找后续非空重复 Key。
 
 构建完成后既可以直接启动 JAR，也可以解压生成的发行包：
 
@@ -104,7 +98,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\update-local.ps1 -
 | 任务模式 | `/plan [任务]`、`/team [任务]`、`/cancel` |
 | 代码库 | `/index [路径]`、`/search <查询>`、`/graph <类名>` |
 | 记忆 | `/save <事实>`、`/save --global <事实>`、`/memory list/search/delete/clear` |
-| 模型与配置 | `/model <provider>`、`/config provider ...` |
+| 模型与配置 | `/model <provider>`、`/config provider ...`、`/config project-env on/off` |
 | MCP 与浏览器 | `/mcp`、`/mcp restart <name>`、`/browser status/connect/disconnect/tabs` |
 | Skill | `/skill list`、`/skill show <name>`、`/skill on/off <name>`、`/skill reload` |
 | 安全与回滚 | `/hitl on/off`、`/policy`、`/audit [N]`、`/snapshot`、`/snapshot clean`、`/restore <N>` |
@@ -139,7 +133,7 @@ Agent 可使用 `read_file`、`write_file`、`list_dir`、`glob_files`、`grep_c
 
 | 用途 | 位置或变量 |
 | --- | --- |
-| 模型 Key 与模型名 | `.env` 中的 `GLM_API_KEY`、`DEEPSEEK_API_KEY`、`STEP_API_KEY`、`KIMI_API_KEY`、`FREELLMAPI_API_KEY` 或 `AGNES_API_KEY` |
+| 模型 Key 与模型名 | 进程环境变量、`~/.sidekick/credentials.env`（推荐）、兼容 `~/.env`；项目 `.env` 仅在 `/config project-env on` 后回退读取 |
 | 用户配置与 MCP | `~/.sidekick/config.json`、`~/.sidekick/mcp.json` |
 | 项目 MCP 覆盖 | `.sidekick/mcp.json` |
 | 项目记忆 | `SideKick.md`、`.sidekick/SideKick.md`；兼容 `PAI.md` |
