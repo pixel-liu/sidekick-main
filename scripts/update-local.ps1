@@ -1,10 +1,31 @@
 [CmdletBinding()]
 param(
-    [string]$InstallDir = 'D:\software\SideKick'
+    [string]$InstallDir = 'D:\software\SideKick',
+    [switch]$RegisterOnly
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+function Register-LocalUpdater {
+    $batchSourceRoot = $sourceRoot.Replace('%', '%%')
+    $launcher = @"
+@echo off
+chcp 65001 >nul
+setlocal
+set "SIDEKICK_SOURCE_DIR=$batchSourceRoot"
+if not exist "%SIDEKICK_SOURCE_DIR%\update-sidekick.bat" (
+    echo [SideKick] Source repository was moved. Register this updater again.
+    if not "%~1"=="--no-pause" pause
+    exit /b 1
+)
+call "%SIDEKICK_SOURCE_DIR%\update-sidekick.bat" "%~dp0." "%~1"
+exit /b %errorlevel%
+"@
+    $launcherPath = Join-Path $resolvedInstallDir 'update-sidekick.bat'
+    [System.IO.File]::WriteAllText($launcherPath, ($launcher -replace '\r?\n', "`r`n") + "`r`n", [System.Text.UTF8Encoding]::new($false))
+    Write-Host "Double-click updater: $launcherPath"
+}
 
 try {
     $sourceRoot = Split-Path -Parent $PSScriptRoot
@@ -14,6 +35,10 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $resolvedInstallDir $relativeFile) -PathType Leaf)) {
             throw "Not an existing SideKick installation: $resolvedInstallDir (missing $relativeFile)"
         }
+    }
+    if ($RegisterOnly) {
+        Register-LocalUpdater
+        exit 0
     }
     $maven = Get-Command mvn.cmd -ErrorAction Stop
     Get-Command java.exe -ErrorAction Stop | Out-Null
@@ -81,6 +106,7 @@ try {
         }
     }
 
+    Register-LocalUpdater
     Write-Host "Updated SideKick in: $resolvedInstallDir"
     Write-Host "Previous program files: $backupRoot"
     Write-Host 'Your .env and other configuration files were preserved.'

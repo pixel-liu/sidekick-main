@@ -65,15 +65,23 @@ java -jar target/Sidekick-1.0-SNAPSHOT.jar
 
 发行产物为 `target/sidekick-1.0-SNAPSHOT.zip` 和 `target/sidekick-1.0-SNAPSHOT.tar.gz`，均包含可执行启动脚本、fat JAR、安装说明和环境变量示例。发布构建可通过 `-Ddistribution.version=1.0.0` 覆盖发行包版本号。
 
-Windows 本地代码更新后，先退出正在运行的 SideKick，再双击仓库根目录的 `update-sidekick.bat`。脚本自动从所在仓库执行 `mvn clean package`，成功后将 JAR 和启动脚本更新到已有的 `D:\software\SideKick` 安装目录；保留 `.env` 等配置，旧程序文件备份在安装目录的 `.update-backups` 下，替换失败会尝试恢复。窗口结束时会停留显示结果。打包默认跳过测试，更新后在目标项目目录重新运行 `sidekick`。
+Windows 日常更新入口放在安装目录：先退出正在运行的 SideKick，再双击 `D:\software\SideKick\update-sidekick.bat`。首次在源码仓库中执行以下命令即可生成此入口，无需构建或替换程序：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\update-local.ps1 -RegisterOnly
+```
+
+安装目录中的 BAT 记录源码仓库路径，并将自身所在目录作为更新目标，调用仓库根目录的 `update-sidekick.bat` 执行 `mvn clean package`。成功后更新 JAR 和启动脚本，并自动生成或刷新安装目录中的更新入口；保留 `.env` 等配置，旧程序文件备份在 `.update-backups` 下，替换失败会尝试恢复。窗口结束时会停留显示结果。打包默认跳过测试，更新后在目标项目目录重新运行 `sidekick`。源码仓库需保留，移动仓库后请从新位置重新执行注册命令。
 
 安装在其他位置时，可在 PowerShell 中指定目录：
 
 ```powershell
 .\update-sidekick.bat "E:\apps\SideKick"
+# 仅生成该安装目录中的更新入口
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\update-local.ps1 -InstallDir "E:\apps\SideKick" -RegisterOnly
 ```
 
-此脚本更新本地已有安装，需安装 Java 17+ 和 Maven；它使用当前工作区代码，不自动拉取 GitHub，也不自动启动会话。命令行自动化可在目录参数后追加 `--no-pause` 跳过结束暂停，并通过退出码判断结果。
+此脚本更新本地已有安装，需安装 Java 17+ 和 Maven；它使用当前工作区代码，不自动拉取 GitHub，也不自动启动会话。命令行自动化调用安装目录中的 BAT 时传入 `--no-pause` 跳过结束暂停；调用仓库 BAT 时在目录参数后追加此参数。两者均可通过退出码判断结果。
 
 启动后可以直接描述任务，例如“读取 pom.xml 并说明项目结构”。复杂任务使用：
 
