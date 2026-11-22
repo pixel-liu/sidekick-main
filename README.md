@@ -56,6 +56,8 @@ Copy-Item .env.example .env
 GLM_API_KEY=your_api_key_here
 ```
 
+SideKick 先读取当前项目 `.env`，再回退到用户目录的 `~/.env`。同一个 Key 出现多次时会忽略空值并使用第一个非空值；项目中的有效值优先于用户目录配置。
+
 构建完成后既可以直接启动 JAR，也可以解压生成的发行包：
 
 ```bash

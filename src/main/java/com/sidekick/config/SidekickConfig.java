@@ -274,7 +274,10 @@ public class SidekickConfig {
     }
 
     private static String readFromDotEnv(String key) {
-        File[] envFiles = { new File(".env"), new File(System.getProperty("user.home"), ".env") };
+        return readFromDotEnv(key, new File(".env"), new File(System.getProperty("user.home"), ".env"));
+    }
+
+    static String readFromDotEnv(String key, File... envFiles) {
         for (File envFile : envFiles) {
             if (!envFile.exists()) continue;
             try (BufferedReader reader = new BufferedReader(new FileReader(envFile))) {
@@ -283,7 +286,10 @@ public class SidekickConfig {
                     line = line.trim();
                     if (line.isEmpty() || line.startsWith("#")) continue;
                     if (line.startsWith(key + "=")) {
-                        return line.substring((key + "=").length()).trim();
+                        String value = line.substring((key + "=").length()).trim();
+                        if (!value.isEmpty()) {
+                            return value;
+                        }
                     }
                 }
             } catch (IOException ignored) {}
