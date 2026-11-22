@@ -16,6 +16,7 @@ Read SideKick.md for the shared architecture and development commands.
 - 实时思考在 JLine 临时区域显示，与固定状态行分开管理，刷新期间隐藏光标。每条提问的多次模型思考合并在问题下方的同一个折叠入口中。Ctrl+O 展开后，入口、思考正文、回答顺序固定。在可展开的当前轮结束前保留完整回答，避免把部分正文提前写入历史。有可滚动内容时，折叠和展开视图都用鼠标滚轮双向浏览当前轮，触顶不会丢失滚轮；终端历史仍可通过终端自身的滚动条查看。Alt+O 仅查看最近一批工具调用及结果摘要。回答中的目录树和代码块按原顺序直接显示，不进入工具详情；仅有隐藏思考和工具调用的迭代不向正文追加空行。实时思考与展开后的思考正文不写入终端滚动历史，禁止使用备用屏幕或通过追加输出重放本轮内容。
 - Validate interactive input and the status layout with `mvn test -Pphase16-smoke`.
 - Ctrl+C / Esc 必须能取消任务前快照等待并恢复聊天输入，不能等待目录扫描或大文件压缩结束；已取消的快照准备不得继续启动 Agent。前后快照保持串行，Git 遍历和文件读取需响应线程中断。
+- `/snapshot clean` 只删除当前项目对应的 Side-Git 快照。Windows 下必须清除 JGit 对象文件的只读属性后再递归删除；不得影响项目工作目录或其他项目快照。
 
 ## Built-in skills
 

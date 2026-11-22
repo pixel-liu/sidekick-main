@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.DosFileAttributeView;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -79,5 +80,27 @@ class SideGitManagerTest {
         assertEquals(2, all.size());
         assertEquals(SnapshotPhase.POST_TURN, all.get(0).phase());
         assertEquals(SnapshotPhase.PRE_TURN, all.get(1).phase());
+    }
+
+    @Test
+    void cleanDeletesReadOnlyGitObjectsOnWindows() throws Exception {
+        Path project = tempDir.resolve("project");
+        Path snapshots = tempDir.resolve("snapshots");
+        Files.createDirectories(project);
+        Files.writeString(project.resolve("a.txt"), "before");
+        SideGitManager manager = new SideGitManager(project,
+                new SnapshotConfig(true, snapshots, 50, List.of(".git", "target")));
+        manager.preTurnSnapshot("turn-1", "before task");
+
+        Path object;
+        try (var objects = Files.walk(manager.gitDir().resolve("objects"))) {
+            object = objects.filter(Files::isRegularFile).findFirst().orElseThrow();
+        }
+        DosFileAttributeView attributes = Files.getFileAttributeView(object, DosFileAttributeView.class);
+        assertTrue(attributes != null, "Windows snapshot object must expose DOS attributes");
+        attributes.setReadOnly(true);
+
+        assertTrue(manager.cleanSnapshots().startsWith("🧹"));
+        assertFalse(Files.exists(manager.gitDir().getParent()));
     }
 }

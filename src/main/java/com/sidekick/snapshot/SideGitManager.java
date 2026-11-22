@@ -19,6 +19,7 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.PathMatcher;
+import java.nio.file.attribute.DosFileAttributeView;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -331,8 +332,17 @@ public class SideGitManager {
         try (var walk = Files.walk(root)) {
             List<Path> paths = walk.sorted(Comparator.reverseOrder()).toList();
             for (Path path : paths) {
+                clearReadOnlyAttribute(path);
                 Files.deleteIfExists(path);
             }
+        }
+    }
+
+    /** JGit stores loose objects as read-only files on Windows. */
+    private static void clearReadOnlyAttribute(Path path) throws IOException {
+        DosFileAttributeView attributes = Files.getFileAttributeView(path, DosFileAttributeView.class);
+        if (attributes != null && attributes.readAttributes().isReadOnly()) {
+            attributes.setReadOnly(false);
         }
     }
 

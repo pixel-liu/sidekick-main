@@ -2,6 +2,22 @@
 
 按日期倒序记录项目变更、验证结果和待处理问题。
 
+## 2026-11-22 — 修复 Windows 下只读快照文件无法清理
+
+### 已完成
+
+- 定位 `/snapshot clean` 失败：JGit 在 Windows 上将 loose object 标为只读，旧清理逻辑直接删除会在对象文件处失败。
+- 清理前逐项移除 DOS 只读属性后删除，仍仅作用于当前项目对应的 Side-Git 快照目录；README.md 和 AGENTS.md 同步清理语义。
+
+### 验证结果
+
+- 新增 SideGit 回归：创建真实快照后将 Git 对象设为只读，`/snapshot clean` 的底层清理成功并删除快照目录。
+- `mvn test "-Dtest=SideGitManagerTest,InterruptibleFileTreeIteratorTest" -DskipTests=false` 通过，5 项测试全部成功；`git diff --check` 通过。
+
+### 遗留与边界
+
+- 受本机执行策略限制，不能直接递归删除已有用户目录快照；更新新版后从对应项目目录运行 `/snapshot clean` 即可清理。不会自动删除其他项目（包括桌面）的快照。
+
 ## 2026-11-22 — 修复任务前快照导致 Ctrl+C 后迟迟没有输入框
 
 ### 已完成

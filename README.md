@@ -105,7 +105,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\update-local.ps1 -
 | 模型与配置 | `/model <provider>`、`/config provider ...` |
 | MCP 与浏览器 | `/mcp`、`/mcp restart <name>`、`/browser status/connect/disconnect/tabs` |
 | Skill | `/skill list`、`/skill show <name>`、`/skill on/off <name>`、`/skill reload` |
-| 安全与回滚 | `/hitl on/off`、`/policy`、`/audit [N]`、`/snapshot`、`/restore <N>` |
+| 安全与回滚 | `/hitl on/off`、`/policy`、`/audit [N]`、`/snapshot`、`/snapshot clean`、`/restore <N>` |
 | 其他 | `/task`、`/export`、`/init`、`/clear`、`/exit` |
 
 输入 `/help` 或在命令后按补全键可查看完整参数。
