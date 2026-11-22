@@ -26,6 +26,8 @@ sidekick
 
 启动脚本不会切换工作目录，因此 SideKick 会将运行命令时所在的目录作为项目根。Windows、macOS 和 Linux 的详细安装步骤见发行包内的 `INSTALL.md`。
 
+交互终端输出通过 JLine 的 Unicode Writer 显示，避免 Windows 默认 GBK 编码把 `⏳`、`⚠️` 等符号替换成 `?`；无需修改系统区域设置或手动切换代码页。
+
 发布 GitHub Release 后可以使用安装脚本完成下载、安装和 PATH 配置：
 
 ```powershell

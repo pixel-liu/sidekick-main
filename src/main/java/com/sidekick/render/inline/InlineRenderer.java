@@ -6,6 +6,7 @@ import com.sidekick.llm.LlmClient;
 import com.sidekick.render.PlainRenderer;
 import com.sidekick.render.Renderer;
 import com.sidekick.render.StatusInfo;
+import com.sidekick.render.TerminalOutput;
 import com.sidekick.util.AnsiStyle;
 import org.jline.reader.LineReader;
 import org.jline.terminal.Terminal;
@@ -49,13 +50,13 @@ public final class InlineRenderer implements Renderer {
     private final StringBuilder assistantLineBuffer = new StringBuilder();
 
     public InlineRenderer(Terminal terminal) {
-        this(terminal, System.out);
+        this(terminal, TerminalOutput.stream(terminal));
     }
 
     /** 测试用构造器：注入输出流，避免污染真实 stdout。 */
     InlineRenderer(Terminal terminal, PrintStream out) {
         this.terminal = terminal;
-        this.fallback = new PlainRenderer();
+        this.fallback = new PlainRenderer(terminal);
         this.out = out;
         this.statusBar = TerminalCapabilities.supportsScrollRegion(terminal)
                 ? new BottomStatusBar(terminal, out)

@@ -2,6 +2,26 @@
 
 按日期倒序记录项目变更、验证结果和待处理问题。
 
+## 2026-11-22 — 修复 Windows 终端符号显示为问号
+
+### 已完成
+
+- 定位 MCP 启动进度 `⏳` 和超时提示 `⚠️` 变成 `?` 的原因：inline 内部 UTF-8 文本最终经过 Windows 的旧编码 `System.out`，丢失不在字符集内的符号。
+- inline、plain 及降级渲染器统一经 UTF-8 适配流写入 JLine Unicode Writer，绕开有损转换；无终端时保留原 stdout，保持现有颜色和交互布局。
+- 同步 README.md、AGENTS.md，记录终端输出约束。
+
+### 验证结果
+
+- 新增 Windows GBK stdout 回归，在修复前 3 种渲染模式全部失败，修复后全部通过，确认中文、沙漏和警告符号完整写入终端 Writer。
+- 新增 UTF-8 逐字节写入及刷新回归，确认多字节字符不会因输出分段而损坏，并覆盖无终端回退。
+- `mvn test -Pphase16-smoke` 通过，145 项测试全部成功；`git diff --check` 通过。
+- `mvn package` 成功，生成新版 JAR、ZIP 与 tar.gz 发行包。
+
+### 遗留与边界
+
+- 尚未在用户的 Windows Terminal 窗口中人工复核字形；本次修复编码丢失，实际字形仍由终端字体提供。
+- 已有 SideKick 会话仍使用旧 JAR，须退出后更新安装并重新启动。
+
 ## 2026-11-22 — 隔离 SideKick 模型凭据与项目 .env
 
 ### 已完成

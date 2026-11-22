@@ -7,6 +7,7 @@ import com.sidekick.hitl.ApprovalRequest;
 import com.sidekick.hitl.ApprovalResult;
 import com.sidekick.llm.LlmClient;
 import com.sidekick.util.AnsiStyle;
+import org.jline.terminal.Terminal;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -31,7 +32,11 @@ public final class PlainRenderer implements Renderer {
     private final BufferedReader in;
 
     public PlainRenderer() {
-        this(System.out, new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8)));
+        this((Terminal) null);
+    }
+
+    public PlainRenderer(Terminal terminal) {
+        this(TerminalOutput.stream(terminal), new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8)));
     }
 
     PlainRenderer(PrintStream out, BufferedReader in) {

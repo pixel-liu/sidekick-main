@@ -68,15 +68,15 @@ public final class RendererFactory {
      */
     public static Renderer create(Mode mode, Terminal terminal) {
         return switch (mode) {
-            case PLAIN -> new PlainRenderer();
+            case PLAIN -> new PlainRenderer(terminal);
             case INLINE -> {
                 if (TerminalCapabilities.supportsAnsi(terminal)) {
                     yield new InlineRenderer(terminal);
                 }
                 System.err.println("⚠️ 终端不支持 ANSI，inline 模式回退到 plain");
-                yield new PlainRenderer();
+                yield new PlainRenderer(terminal);
             }
-            case LANTERNA -> new PlainRenderer();    // Day 5 后替换为 LanternaRenderer
+            case LANTERNA -> new PlainRenderer(terminal);    // Day 5 后替换为 LanternaRenderer
         };
     }
 }
