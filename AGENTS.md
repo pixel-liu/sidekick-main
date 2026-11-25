@@ -6,7 +6,7 @@ Read SideKick.md for the shared architecture and development commands.
 
 - 每次迭代项目代码，都必须在 CHANGELOG.md 中记录本次变更、验证结果和遗留问题；完成相关验证后提交本次迭代的代码与文档，并推送到当前 GitHub 仓库的对应分支。
 - Git 提交信息和推送到 GitHub 的变更描述统一使用中文。
-- Windows 日常更新入口位于安装目录的 `update-sidekick.bat`，通过 `scripts/update-local.ps1 -RegisterOnly` 生成，引用源码仓库的 BAT；常规更新成功后刷新入口。默认安装目录为 `D:\software\SideKick`，保留配置并备份旧程序文件。修改此流程时同步 README.md。
+- Windows 日常更新入口位于安装目录的 `update-sidekick.bat`，通过 `scripts/update-local.ps1 -RegisterOnly` 生成，引用源码仓库的 BAT；常规更新成功后刷新入口。默认安装目录为 `D:\software\SideKick`，保留配置并备份旧程序文件。构建前检查文件占用，替换时仅对共享/锁冲突限时重试；不得强制结束用户会话。修改此流程时同步 README.md，并运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-update-local.ps1`。
 
 ## Inline terminal input
 

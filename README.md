@@ -69,7 +69,7 @@ Windows 日常更新入口放在安装目录：先退出正在运行的 SideKick
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\update-local.ps1 -RegisterOnly
 ```
 
-安装目录中的 BAT 记录源码仓库路径，并将自身所在目录作为更新目标，调用仓库根目录的 `update-sidekick.bat` 执行 `mvn clean package`。成功后更新 JAR 和启动脚本，并自动生成或刷新安装目录中的更新入口；保留 `.env` 等配置，旧程序文件备份在 `.update-backups` 下，替换失败会尝试恢复。窗口结束时会停留显示结果。打包默认跳过测试，更新后在目标项目目录重新运行 `sidekick`。源码仓库需保留，移动仓库后请从新位置重新执行注册命令。
+安装目录中的 BAT 记录源码仓库路径，并将自身所在目录作为更新目标，调用仓库根目录的 `update-sidekick.bat` 执行 `mvn clean package`。构建前检查程序文件是否被占用；发现占用会显示具体路径并等待最多 60 秒，退出相关 SideKick 会话或关闭占用程序后自动继续，超时则保留原安装并退出。替换阶段遇到临时占用也会限时重试。直接调用 PowerShell 脚本时可用 `-LockWaitSeconds 120` 调整等待时间（`0` 表示不等待）。成功后更新 JAR 和启动脚本，并自动生成或刷新安装目录中的更新入口；保留 `.env` 等配置，旧程序文件备份在 `.update-backups` 下，替换失败会尝试恢复。窗口结束时会停留显示结果。打包默认跳过测试，更新后在目标项目目录重新运行 `sidekick`。源码仓库需保留，移动仓库后请从新位置重新执行注册命令。
 
 安装在其他位置时，可在 PowerShell 中指定目录：
 

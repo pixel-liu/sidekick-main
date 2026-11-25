@@ -1,11 +1,52 @@
 [CmdletBinding()]
 param(
     [string]$InstallDir = 'D:\software\SideKick',
-    [switch]$RegisterOnly
+    [switch]$RegisterOnly,
+    [ValidateRange(0, 3600)]
+    [int]$LockWaitSeconds = 60
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+function Invoke-WithFileLockRetry {
+    param([string]$Path, [scriptblock]$Action)
+
+    $timer = [System.Diagnostics.Stopwatch]::StartNew()
+    $reported = $false
+    while ($true) {
+        try {
+            & $Action
+            return
+        } catch {
+            $cause = $_.Exception
+            while ($null -ne $cause.InnerException) { $cause = $cause.InnerException }
+            $code = $cause.HResult -band 0xffff
+            # Only sharing/lock violations are transient. Do not hide permission or disk errors.
+            if ($cause -isnot [System.IO.IOException] -or $code -notin @(32, 33)) { throw }
+            if (-not $reported) {
+                Write-Host "[SideKick] File in use: $Path" -ForegroundColor Yellow
+                Write-Host "Close the SideKick session or other program using this file. Waiting up to $LockWaitSeconds seconds; update will continue automatically."
+                $reported = $true
+            }
+            if ($timer.Elapsed.TotalSeconds -ge $LockWaitSeconds) {
+                throw "File still in use after $LockWaitSeconds seconds: $Path. Close the program using it and retry."
+            }
+            Start-Sleep -Milliseconds 250
+        }
+    }
+}
+
+function Wait-ForInstallationFiles {
+    foreach ($relativeFile in $relativeFiles) {
+        $destination = Join-Path $resolvedInstallDir $relativeFile
+        Invoke-WithFileLockRetry -Path $destination -Action {
+            $handle = [System.IO.File]::Open($destination, [System.IO.FileMode]::Open,
+                [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+            $handle.Dispose()
+        }
+    }
+}
 
 function Register-LocalUpdater {
     $batchSourceRoot = $sourceRoot.Replace('%', '%%')
@@ -40,6 +81,8 @@ try {
         Register-LocalUpdater
         exit 0
     }
+    # Fail before an expensive build if an existing session keeps the installation locked.
+    Wait-ForInstallationFiles
     $maven = Get-Command mvn.cmd -ErrorAction Stop
     Get-Command java.exe -ErrorAction Stop | Out-Null
 
@@ -84,7 +127,10 @@ try {
         for ($i = 0; $i -lt $relativeFiles.Count; $i++) {
             $destination = Join-Path $resolvedInstallDir $relativeFiles[$i]
             $backup = Join-Path $backupRoot $relativeFiles[$i]
-            [System.IO.File]::Replace($stagedFiles[$i], $destination, $backup)
+            # A session or scanner can acquire a lock after the pre-build check.
+            Invoke-WithFileLockRetry -Path $destination -Action {
+                [System.IO.File]::Replace($stagedFiles[$i], $destination, $backup)
+            }
             $replacedFiles += $relativeFiles[$i]
         }
     } catch {
@@ -97,7 +143,7 @@ try {
                 Write-Warning "Restore failed for $relativeFile. Restore it manually from: $backupRoot"
             }
         }
-        throw "Update failed. Close SideKick and retry. Backups: $backupRoot. $updateError"
+        throw "Update failed. Backups of replaced files: $backupRoot. $updateError"
     } finally {
         foreach ($staged in $stagedFiles) {
             if (Test-Path -LiteralPath $staged) {
