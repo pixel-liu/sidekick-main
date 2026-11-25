@@ -16,6 +16,7 @@ Read SideKick.md for the shared architecture and development commands.
 - Show the starting directory next to the SK logo, immediately above the hint that approvals are off by default and `/hitl on` enables them. Preserve the startup banner palette and assistant reply formatting. Use bright white for the entire `Thinking` fold control and RGB(102, 102, 102) for reasoning, tools, approvals, and other inline conversation details. Preserve the existing semantic colors for the chat input, completion timing, and bottom status row.
 - 实时思考在 JLine 临时区域显示，与固定状态行分开管理，刷新期间隐藏光标。每条提问的多次模型思考合并在问题下方的同一个折叠入口中。Ctrl+O 展开后，入口、思考正文、回答顺序固定。在可展开的当前轮结束前保留完整回答，避免把部分正文提前写入历史。有可滚动内容时，折叠和展开视图都用鼠标滚轮双向浏览当前轮，触顶不会丢失滚轮；终端历史仍可通过终端自身的滚动条查看。Alt+O 仅查看最近一批工具调用及结果摘要。回答中的目录树和代码块按原顺序直接显示，不进入工具详情；仅有隐藏思考和工具调用的迭代不向正文追加空行。实时思考与展开后的思考正文不写入终端滚动历史，禁止使用备用屏幕或通过追加输出重放本轮内容。
 - Validate interactive input and the status layout with `mvn test -Pphase16-smoke`.
+- 窗口最大化、全屏与 Win+方向键贴靠触发尺寸突变时，先按新网格重算临时显示区的旧内容及光标，再清理和重绘；不得按旧宽度擦除或丢弃已绘制区域记录。保留输入草稿、光标和终端历史，忽略临时零尺寸与重复尺寸通知。
 - Ctrl+C / Esc 必须能取消任务前快照等待并恢复聊天输入，不能等待目录扫描或大文件压缩结束；已取消的快照准备不得继续启动 Agent。前后快照保持串行，Git 遍历和文件读取需响应线程中断。
 - `/snapshot clean` 只删除当前项目对应的 Side-Git 快照。Windows 下必须清除 JGit 对象文件的只读属性后再递归删除；不得影响项目工作目录或其他项目快照。
 - Provider 凭据默认只从用户级 `~/.sidekick/config.json`、进程环境变量、`~/.sidekick/credentials.env` 和兼容用的 `~/.env` 读取；当前项目 `.env` 默认不参与，以免项目密钥误覆盖 SideKick。仅当 `/config project-env on` 持久开启，或设置 `SIDEKICK_ALLOW_PROJECT_ENV_CREDENTIALS=true` 时，才将项目 `.env` 作为最后回退。重复 Key 必须跳过空值；修改加载逻辑时覆盖默认隔离、显式开启、专用凭据优先和用户目录回退。

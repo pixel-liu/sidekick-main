@@ -169,15 +169,7 @@ public final class ChatLineReader extends LineReaderImpl {
         lock.lock();
         AttributedString originalPrompt = prompt;
         try {
-            if (chatInput && display != null && !(display instanceof TransientDisplay)) {
-                // JLine can replace its display after the first status update. The replacement
-                // may already own a drawn input frame, so leave its cursor at the frame origin.
-                display.update(List.of(), 0, false);
-                var inline = new TransientDisplay(terminal);
-                inline.setDelayLineWrap(display.delayLineWrap());
-                inline.resize(size.getRows(), size.getColumns());
-                display = inline;
-            }
+            ensureTransientDisplay();
             if (showFrame()) {
                 prompt = new AttributedStringBuilder().append(rule()).append('\n')
                         .append(originalPrompt).toAttributedString();
@@ -201,7 +193,20 @@ public final class ChatLineReader extends LineReaderImpl {
 
     @Override
     public AttributedString getDisplayedBufferWithPrompts(List<AttributedString> secondaryPrompts) {
+        // super.redisplay can replace the display when the status first appears, after
+        // our redisplay entry point. Install the transient display before it paints.
+        ensureTransientDisplay();
         return inputFrame(secondaryPrompts);
+    }
+
+    private void ensureTransientDisplay() {
+        if (chatInput && display != null && !(display instanceof TransientDisplay)) {
+            display.update(List.of(), 0, false);
+            var inline = new TransientDisplay(terminal);
+            inline.setDelayLineWrap(display.delayLineWrap());
+            inline.resize(size.getRows(), size.getColumns());
+            display = inline;
+        }
     }
 
     private AttributedString inputFrame(List<AttributedString> secondaryPrompts) {
@@ -302,9 +307,25 @@ public final class ChatLineReader extends LineReaderImpl {
         }
         lock.lock();
         try {
-            if (chatInput && reading && display != null && !size.equals(terminal.getBufferSize())) {
-                // JLine replaces its display on resize. Erase the old frame before it loses those rows.
-                display.update(List.of(), 0, false);
+            Size resized = terminal.getBufferSize();
+            if (chatInput && reading && display instanceof TransientDisplay) {
+                if (resized.getRows() <= 0 || resized.getColumns() <= 0) {
+                    return;
+                }
+                if (!size.equals(resized)) {
+                    doAutosuggestion = false;
+                    // Keep the display's frame and cursor records. JLine's default WINCH
+                    // handler replaces them, and erasing at the old width leaves wrapped rules.
+                    display.resize(resized.getRows(), resized.getColumns());
+                    display.update(List.of(), 0, false);
+                    size.copy(resized);
+                    Status.getExistingStatus(terminal).ifPresent(status -> status.resize(resized));
+                    if (statusBar != null) {
+                        statusBar.flushNow();
+                    }
+                    redisplay();
+                }
+                return;
             }
             super.handleSignal(signal);
             if (statusBar != null) {

@@ -255,6 +255,8 @@
                                 <include>**/hitl/SwitchableHitlHandlerTest.java</include>
                                 <include>**/render/*Test.java</include>
                                 <include>**/render/inline/BottomStatusBarTest.java</include>
+                                <include>**/render/inline/ChatLineReaderResizeTest.java</include>
+                                <include>**/render/inline/InlineActivityDisplayTest.java</include>
                                 <include>**/render/inline/BlockRegistryTest.java</include>
                                 <include>**/render/inline/FoldableBlockTest.java</include>
                                 <include>**/render/inline/InlineRendererTest.java</include>
